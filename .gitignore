@@ -1,0 +1,28 @@
+# Directorios de caché y compilados de Python
+__pycache__/
+
+# Archivos compilados sueltos
+*.pyc
+
+# Entornos virtuales (si los usas, ¡muy recomendable!)
+env/
+venv/
+.venv/
+
+# Archivos de base de datos (si usas SQLite, como en Flask/Django)
+*.sqlite3
+*.db
+
+# Archivos de log
+*.log
+
+# Archivos de configuración sensibles (¡NO DEBEN SUBIRSE!)
+.env             # Común para variables de entorno
+*.ini            # Archivos de configuración genéricos
+config.py        # Si config.py contiene secretos y no quieres que se suba
+# Puedes tener un config_local.py que ignores para secretos
+
+# Archivos temporales de sistemas operativos y editores
+.DS_Store        # macOS
+Thumbs.db        # Windows
+.vscode/         # Configuraciones de VS Code para el workspace
