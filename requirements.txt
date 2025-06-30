@@ -1,0 +1,4 @@
+Flask
+Flask-MQTT
+Flask-SQLAlchemy
+paho-mqtt
