@@ -29,9 +29,11 @@ def init_mqtt(app):
                     print("[ERROR] MQTT: serial_number no proporcionado")
                     return
 
+                # Buscar si ya existe el dispositivo
                 dispositivo = Dispositivo.query.filter_by(serial_number=serial).first()
 
                 if not dispositivo:
+                    # Crear uno nuevo
                     dispositivo = Dispositivo(
                         serial_number=serial,
                         nombre="No definido",
@@ -45,12 +47,15 @@ def init_mqtt(app):
                     db.session.commit()
                     print(f"[MQTT] Nuevo dispositivo creado: {serial}")
                 else:
+                    # Actualizar el existente
                     if estado:
                         dispositivo.estado = estado
                     if parametros:
                         dispositivo.parametros = parametros
                     db.session.commit()
+                    print(f"[MQTT] Dispositivo actualizado: {serial}")
 
+                # Registrar log de estado
                 if dispositivo.id:
                     log = EstadoLog(
                         dispositivo_id=dispositivo.id,
@@ -60,6 +65,7 @@ def init_mqtt(app):
                     db.session.add(log)
                     db.session.commit()
                     print(f"[MQTT] Estado actualizado: {serial} -> {estado} | Parámetros: {parametros}")
+
             except Exception as e:
                 print("[MQTT ERROR]", e)
                 db.session.rollback()
