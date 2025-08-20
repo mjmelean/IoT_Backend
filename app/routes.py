@@ -37,10 +37,9 @@ def cambiar_estado(id):
             return jsonify({"error": "Datos JSON inválidos o faltantes"}), 400
 
         dispositivo = Dispositivo.query.get_or_404(id)
-        if "estado" in data:
-            dispositivo.estado = data["estado"]
-        if "configuracion" in data:
-            dispositivo.configuracion = data["configuracion"]
+
+        # ✅ Actualizamos con helper
+        update_dispositivo_from_payload(dispositivo, data)
 
         log = EstadoLog(
             dispositivo_id=id,
@@ -53,6 +52,7 @@ def cambiar_estado(id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Error al actualizar estado", "detalle": str(e)}), 500
+
 
 @bp.route('/dispositivos/<int:id>', methods=['GET'])
 def obtener_dispositivo(id):
@@ -121,12 +121,8 @@ def reclamar_dispositivo():
         if not dispositivo:
             return jsonify({"error": "Dispositivo no encontrado. Asegúrese de que haya sido detectado por MQTT"}), 404
 
-        dispositivo.nombre = data.get('nombre', dispositivo.nombre)
-        dispositivo.tipo = data.get('tipo', dispositivo.tipo)
-        dispositivo.modelo = data.get('modelo', dispositivo.modelo)
-        dispositivo.descripcion = data.get('descripcion', dispositivo.descripcion)
-        dispositivo.configuracion = data.get('configuracion', dispositivo.configuracion)
-        dispositivo.reclamado = True  # <-- Marca como reclamado al reclamar
+        # ✅ Usamos helper con reclamar=True
+        update_dispositivo_from_payload(dispositivo, data, reclamar=True)
 
         db.session.commit()
         return jsonify({
@@ -137,7 +133,6 @@ def reclamar_dispositivo():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Error al reclamar dispositivo", "detalle": str(e)}), 500
-
 
 # Nuevo endpoint para obtener dispositivos no reclamados
 @bp.route('/dispositivos/no-reclamados', methods=['GET'])
@@ -156,3 +151,29 @@ def obtener_no_reclamados():
         ])
     except Exception as e:
         return jsonify({"error": "Error al obtener dispositivos no reclamados", "detalle": str(e)}), 500
+
+## Helper
+def update_dispositivo_from_payload(dispositivo, data, reclamar=False):
+    """
+    Actualiza un dispositivo desde un payload recibido.
+    - Si reclamar=True, también marca el dispositivo como reclamado.
+    """
+    if "nombre" in data:
+        dispositivo.nombre = data["nombre"]
+    if "tipo" in data:
+        dispositivo.tipo = data["tipo"]
+    if "modelo" in data:
+        dispositivo.modelo = data["modelo"]
+    if "descripcion" in data:
+        dispositivo.descripcion = data["descripcion"]
+    if "estado" in data:
+        dispositivo.estado = data["estado"]
+    if "parametros" in data:
+        dispositivo.parametros = data["parametros"]
+    if "configuracion" in data:
+        dispositivo.configuracion = data["configuracion"]
+
+    if reclamar:
+        dispositivo.reclamado = True
+
+    return dispositivo

@@ -3,6 +3,7 @@ from flask import current_app
 from flask_mqtt import Mqtt
 from app.models import Dispositivo, EstadoLog
 from app.db import db
+from sqlalchemy.exc import IntegrityError
 
 mqtt = Mqtt()
 
@@ -13,7 +14,7 @@ def init_mqtt(app):
 
     @mqtt.on_connect()
     def handle_connect(client, userdata, flags, rc):
-        print("MQTT conectado")
+        print("✅ MQTT conectado")
         mqtt.subscribe("dispositivos/estado")
 
     @mqtt.on_message()
@@ -24,6 +25,7 @@ def init_mqtt(app):
                 serial = data.get("serial_number")
                 estado = data.get("estado")
                 parametros = data.get("parametros", {})
+                configuracion = data.get("configuracion", {})
 
                 if not serial:
                     print("[ERROR] MQTT: serial_number no proporcionado")
@@ -33,27 +35,44 @@ def init_mqtt(app):
                 dispositivo = Dispositivo.query.filter_by(serial_number=serial).first()
 
                 if not dispositivo:
-                    # Crear uno nuevo
+                    # Crear nuevo
                     dispositivo = Dispositivo(
                         serial_number=serial,
                         nombre="No definido",
                         tipo="generico",
                         modelo="desconocido",
+                        descripcion="",
                         estado=estado or 'desconocido',
                         parametros=parametros,
+                        configuracion=configuracion,
                         reclamado=False
                     )
                     db.session.add(dispositivo)
+
+                # 🔄 Actualizar siempre (nuevo o existente)
+                if estado:
+                    dispositivo.estado = estado
+                if parametros:
+                    dispositivo.parametros = parametros
+                if configuracion:
+                    dispositivo.configuracion = configuracion
+
+                try:
                     db.session.commit()
-                    print(f"[MQTT] Nuevo dispositivo creado: {serial}")
-                else:
-                    # Actualizar el existente
-                    if estado:
-                        dispositivo.estado = estado
-                    if parametros:
-                        dispositivo.parametros = parametros
-                    db.session.commit()
-                    print(f"[MQTT] Dispositivo actualizado: {serial}")
+                    print(f"[MQTT] 🔄 Dispositivo creado/actualizado: {serial}")
+                except IntegrityError:
+                    db.session.rollback()
+                    # Otro thread/mensaje ya creó el dispositivo → recuperarlo y actualizar
+                    dispositivo = Dispositivo.query.filter_by(serial_number=serial).first()
+                    if dispositivo:
+                        if estado:
+                            dispositivo.estado = estado
+                        if parametros:
+                            dispositivo.parametros = parametros
+                        if configuracion:
+                            dispositivo.configuracion = configuracion
+                        db.session.commit()
+                        print(f"[MQTT] ⚠ Dispositivo ya existía, actualizado: {serial}")
 
                 # Registrar log de estado
                 if dispositivo.id:
@@ -64,7 +83,7 @@ def init_mqtt(app):
                     )
                     db.session.add(log)
                     db.session.commit()
-                    print(f"[MQTT] Estado actualizado: {serial} -> {estado} | Parámetros: {parametros}")
+                    print(f"[MQTT] 📒 Estado log registrado: {serial} -> {estado} | Parámetros: {parametros}")
 
             except Exception as e:
                 print("[MQTT ERROR]", e)

@@ -19,7 +19,6 @@ venv/
 # Archivos de configuración sensibles (¡NO DEBEN SUBIRSE!)
 .env             # Común para variables de entorno
 *.ini            # Archivos de configuración genéricos
-config.py        # Si config.py contiene secretos y no quieres que se suba
 # Puedes tener un config_local.py que ignores para secretos
 
 # Archivos temporales de sistemas operativos y editores
