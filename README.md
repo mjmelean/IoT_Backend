@@ -1,9 +1,10 @@
 
-# Backend IoT - Gestión de Dispositivo
+# IoT Backend
 
 ## Descripción
 
-Este backend en Flask permite gestionar dispositivos IoT que envían su estado y configuración mediante MQTT. Los dispositivos se registran automáticamente en la base de datos cuando envían mensajes MQTT con toda su información. La aplicación móvil es la encargada de "reclamar" los dispositivos, confirmando que pertenecen al usuario/proyecto. Además, la app puede actualizar configuraciones, pero no los parámetros reales enviados por MQTT.
+Este backend en **Flask** permite gestionar dispositivos IoT que envían su estado y configuración mediante **MQTT** o que son **reclamados vía HTTP** (por ejemplo, desde QR generado en IoT Alchemy).  
+De esta forma, soporta tanto dispositivos físicos como dispositivos simulados.
 
 ---
 
@@ -18,51 +19,98 @@ Este backend en Flask permite gestionar dispositivos IoT que envían su estado y
 * `run.py` — Script para arrancar la app y reiniciar base de datos (para pruebas).
 
 ---
+## Endpoints
 
-## Funcionamiento General
+* `GET /dispositivos`
+  Lista todos los dispositivos.
 
-1. **Dispositivos IoT** envían mensajes MQTT con:
+* `GET /dispositivos/<id>`
+  Obtiene detalles de un dispositivo con id.
 
-   * `serial_number`
-   * `estado`
-   * `parametros` (datos reales como temperatura, humedad)
-   * `configuracion` (configuración completa del dispositivo)
-
-2. El backend crea o actualiza el dispositivo en la base de datos automáticamente al recibir el MQTT.
-
-3. Los dispositivos aparecen en la lista de dispositivos **no reclamados**.
-
-4. La **app móvil** consulta esta lista y decide si reclamar un dispositivo, enviando una petición a la API para confirmarlo y actualizar sus datos si es necesario.
-
-5. Una vez reclamado, el dispositivo queda marcado como tal y no aparece en la lista de no reclamados.
-
-6. La app móvil puede cambiar solo la configuración (`configuracion`) del dispositivo vía API, **pero no los parámetros reales** que siempre provienen del MQTT.
-
----
-
-## Endpoints Clave
-
+* `PUT /dispositivos/<id>/estado`
+  Actualiza datos y configuracion del dispositivo (Enviados por HTTP).
+  
 * `GET /dispositivos/no-reclamados`
   Lista dispositivos detectados vía MQTT pero aún no reclamados.
 
 * `POST /dispositivos/reclamar`
   Reclama un dispositivo existente con la información enviada (nombre, tipo, configuración, etc).
 
-* `GET /dispositivos`
-  Lista todos los dispositivos.
-
-* `GET /dispositivos/<id>`
-  Obtiene detalles de un dispositivo.
-
-* `PUT /dispositivos/<id>/estado`
-  Actualiza estado y configuración (para uso interno).
-
 * `GET /dispositivos/<id>/logs`
   Obtiene logs de estado del dispositivo.
 
+
+## Funcionamiento General de Creacion + Reclamado de dispositivos IoT
+
+Los datos de los dispositivos IoT siguen esta estructura:
+ *	`id`
+ * `serial`
+ * `nombre`
+ * `tipo`
+ * `modelo`
+ * `descripcion`
+ * `estado`
+ * `parametros {}` 
+ * `configuracion {}` 
+ * `reclamado`
+
+Las cuales son enviados por:
+* MQTT :
+	*  `serial`
+	*  `estado`
+	* `parametros {}` 
+* HTPP :
+	 * `nombre`
+	 * `tipo`
+	 * `modelo`
+	 * `descripcion`
+	 * `configuracion {}` 
+	 
+Los asignados y modificados automaticamente por el backend son:
+* Backend :
+	 * `id` (asignado automaticamente)
+ 	 * `reclamado` (true cuando un dispositivo es reclamado)
+
+### 🔹 1. Flujo con MQTT (automático)
+1. **Dispositivos IoT** envían mensajes MQTT con:
+
+   * `serial_number`
+   * `estado`
+   * `parametros {}` (temperatura, humedad, watts, etc..)
+
+2. El backend crea o actualiza el dispositivo en la base de datos automáticamente al recibir el MQTT.
+
+3. Los dispositivos aparecen en la lista de dispositivos `/dispositivos/no-reclamados`.
+
+4. La **app móvil** consulta esta lista y decide si reclamar un dispositivo, enviando una petición a la API para confirmarlo y actualizar sus datos.
+
 ---
 
-## Ejemplo para Simular un Dispositivo y Reclamarlo
+### 🔹 2. Flujo con HTTP (QR + Reclamo directo)
+
+1. Una vez localizado el dipositivo a reclamar se procede con el proceso de reclamo del Dispositivo
+
+1. IoT Alchemy genera un **QR** con los datos básicos del dispositivo:
+   - `serial`
+   - `nombre`
+   - `tipo`
+   - `modelo`
+   - `descripcion`
+   - `configuracion {}`
+
+2. La aplicación móvil escanea el QR y envía esos datos directamente al endpoint `/dispositivos/reclamar`.
+
+3. El backend modifica `reclamado` a True y completa la informacion faltante
+
+👉 Esto permite que el reclamo sea inmediato desde la app móvil.
+
+⚠️ **Nota:**
+* Los datos: **serial**, **estado** y **parámetros**,  siempre provienen del MQTT, por lo que no se pueden modificar desde la app movil y son propios de los dispositivos simulados
+* Los datos **nombre**, **tipo**, **modelo**, **descripcion** que son enviando por http si son modificables; **configuraciones{}** tambien es modificable pero siguiendo una estructura especifica.
+
+---
+
+## Ejemplo de prueba 
 
 ```python
 import time
@@ -77,10 +125,6 @@ mqtt_payload = json.dumps({
     "parametros": {
         "temperatura": 22.5,
         "humedad": 55
-    },
-    "configuracion": {
-        "intervalo_medicion": 60,
-        "modo": "automático"
     }
 })
 base_url = "http://localhost:5000"
@@ -125,16 +169,3 @@ if any(d["serial_number"] == serial for d in no_reclamados):
 else:
     print("Éxito: dispositivo reclamado correctamente.")
 ```
-
----
-
-## Notas Importantes
-
-* Los **parámetros** (estado real, sensores) solo se actualizan vía MQTT y no pueden ser modificados desde la app móvil.
-* La **configuración** puede ser cambiada por la app móvil a través de la API.
-* El proceso de reclamo es para validar y confirmar que el dispositivo pertenece a un usuario o proyecto.
-* Para pruebas locales, el script `run.py` reinicia la base de datos al iniciar la app.
-
----
-
-
