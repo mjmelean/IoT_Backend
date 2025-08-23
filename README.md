@@ -71,6 +71,8 @@ Los asignados y modificados automaticamente por el backend son:
 	 * `id` (asignado automaticamente)
  	 * `reclamado` (true cuando un dispositivo es reclamado)
 
+---
+
 ### 🔹 1. Flujo con MQTT (automático)
 1. **Dispositivos IoT** envían mensajes MQTT con:
 
@@ -84,7 +86,6 @@ Los asignados y modificados automaticamente por el backend son:
 
 4. La **app móvil** consulta esta lista y decide si reclamar un dispositivo, enviando una petición a la API para confirmarlo y actualizar sus datos.
 
----
 
 ### 🔹 2. Flujo con HTTP (QR + Reclamo directo)
 
@@ -108,64 +109,3 @@ Los asignados y modificados automaticamente por el backend son:
 * Los datos: **serial**, **estado** y **parámetros**,  siempre provienen del MQTT, por lo que no se pueden modificar desde la app movil y son propios de los dispositivos simulados
 * Los datos **nombre**, **tipo**, **modelo**, **descripcion** que son enviando por http si son modificables; **configuraciones{}** tambien es modificable pero siguiendo una estructura especifica.
 
----
-
-## Ejemplo de prueba 
-
-```python
-import time
-import json
-import requests
-import paho.mqtt.publish as publish
-
-serial = "ABC123456"
-mqtt_payload = json.dumps({
-    "serial_number": serial,
-    "estado": "activo",
-    "parametros": {
-        "temperatura": 22.5,
-        "humedad": 55
-    }
-})
-base_url = "http://localhost:5000"
-
-# Enviar mensaje MQTT con info completa
-publish.single("dispositivos/estado", mqtt_payload, hostname="localhost")
-
-# Esperar registro backend
-time.sleep(3)
-
-# Consultar dispositivos no reclamados
-resp = requests.get(f"{base_url}/dispositivos/no-reclamados")
-dispositivos = resp.json()
-
-target = next((d for d in dispositivos if d["serial_number"] == serial), None)
-if not target:
-    print("Dispositivo no encontrado para reclamar.")
-    exit(1)
-
-# Reclamar dispositivo desde app móvil
-reclamo_payload = {
-    "serial_number": serial,
-    "nombre": "Sensor de temperatura 1",
-    "tipo": "sensor",
-    "modelo": "ST-1000",
-    "descripcion": "Sensor en sala 1",
-    "configuracion": {
-        "intervalo_medicion": 60,
-        "modo": "manual"
-    }
-}
-r = requests.post(f"{base_url}/dispositivos/reclamar", json=reclamo_payload)
-print(r.json())
-
-# Verificar que ya no aparezca como no reclamado
-time.sleep(1)
-verif_resp = requests.get(f"{base_url}/dispositivos/no-reclamados")
-no_reclamados = verif_resp.json()
-
-if any(d["serial_number"] == serial for d in no_reclamados):
-    print("Fallo: dispositivo aún no reclamado.")
-else:
-    print("Éxito: dispositivo reclamado correctamente.")
-```
