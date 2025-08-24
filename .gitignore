@@ -4,6 +4,9 @@ __pycache__/
 # Archivos compilados sueltos
 *.pyc
 
+# Archivo del script de organizacion
+textify.py
+
 # Entornos virtuales (si los usas, ¡muy recomendable!)
 env/
 venv/
