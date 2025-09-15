@@ -1,4 +1,5 @@
 from app import create_app, db
+from config import Config
 
 app = create_app()
 
@@ -9,4 +10,10 @@ with app.app_context():
     print("Base de datos reiniciada")
     ################################
 
-    app.run(debug=True)
+    app.run(
+            host=Config.BACKEND_HOST,
+            port=Config.BACKEND_PORT,
+            debug=True,
+            use_reloader=False
+        )
+

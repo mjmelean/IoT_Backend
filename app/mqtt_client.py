@@ -4,12 +4,11 @@ from flask_mqtt import Mqtt
 from app.models import Dispositivo, EstadoLog
 from app.db import db
 from sqlalchemy.exc import IntegrityError
+from app.sse import publish as sse_publish
 
 mqtt = Mqtt()
 
 def init_mqtt(app):
-    app.config['MQTT_BROKER'] = 'localhost'
-    app.config['MQTT_PORT'] = 1883
     mqtt.init_app(app)
 
     @mqtt.on_connect()
@@ -83,6 +82,19 @@ def init_mqtt(app):
                     )
                     db.session.add(log)
                     db.session.commit()
+                    sse_publish({
+                        "id": dispositivo.id,
+                        "serial_number": dispositivo.serial_number,
+                        "nombre": dispositivo.nombre,
+                        "tipo": dispositivo.tipo,
+                        "modelo": dispositivo.modelo,
+                        "descripcion": dispositivo.descripcion,
+                        "estado": dispositivo.estado,
+                        "parametros": dispositivo.parametros,
+                        "configuracion": dispositivo.configuracion,
+                        "reclamado": dispositivo.reclamado,
+                        "event": "device_update"
+                    })
                     print(f"[MQTT] 📒 Estado log registrado: {serial} -> {estado} | Parámetros: {parametros}")
 
             except Exception as e:
