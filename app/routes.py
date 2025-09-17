@@ -1,8 +1,9 @@
-from flask import Blueprint, request, jsonify
-from flask import Response, stream_with_context, request
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from app.models import Dispositivo, EstadoLog
 from app.db import db
-from app.sse import subscribe, unsubscribe
+from app.sse import subscribe, unsubscribe, publish as sse_publish
+import json, time
+from queue import Empty
 
 bp = Blueprint('routes', __name__)
 
@@ -296,28 +297,44 @@ def update_dispositivo_from_payload(dispositivo, data, reclamar=False):
 
 @bp.route('/stream/dispositivos', methods=['GET'])
 def stream_dispositivos():
-    # Filtros opcionales para vista: ?reclamado=true&serial=ABC123
-    serial = request.args.get('serial')
-    recl   = request.args.get('reclamado')
+    """
+    SSE para cambios de dispositivos:
+    - JSON compacto (menos bytes)
+    - Heartbeat 'ping' cada ~25s para evitar timeouts
+    - Filtros opcionales: ?serial=... & ?reclamado=true|false
+    """
+    serial_filter = request.args.get('serial')
+    recl_filter   = request.args.get('reclamado')
 
     def gen():
         q = subscribe()
         try:
             yield "event: hello\ndata: {}\n\n"
+            last_ping = time.time()
             while True:
-                evt = q.get()  # bloquea hasta nuevo evento
-                if serial and evt.get("serial_number") != serial: 
-                    continue
-                if recl in ('true','false') and str(evt.get("reclamado")).lower() != recl:
-                    continue
-                yield f"data: {json.dumps(evt, ensure_ascii=False)}\n\n"
+                try:
+                    # Espera evento hasta 5s; si no llega, manda ping
+                    evt = q.get(timeout=5)
+
+                    if serial_filter and evt.get("serial_number") != serial_filter:
+                        continue
+                    if recl_filter in ('true', 'false') and str(evt.get("reclamado")).lower() != recl_filter:
+                        continue
+
+                    payload = json.dumps(evt, ensure_ascii=False, separators=(',', ':'))
+                    yield f"data: {payload}\n\n"
+
+                except Empty:
+                    if time.time() - last_ping > 25:
+                        yield "event: ping\ndata: {}\n\n"
+                        last_ping = time.time()
         finally:
             unsubscribe(q)
 
     headers = {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no",  # evita buffering en Nginx
+        "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     }
     return Response(stream_with_context(gen()), headers=headers)
