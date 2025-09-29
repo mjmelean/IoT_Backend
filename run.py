@@ -13,7 +13,7 @@ with app.app_context():
     app.run(
             host=Config.BACKEND_HOST,
             port=Config.BACKEND_PORT,
-            debug=True,
+            debug=False,
             use_reloader=False
         )
 

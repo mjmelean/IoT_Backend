@@ -1,20 +1,42 @@
+# app/__init__.py
 from flask import Flask, jsonify
 from app.db import db
 from app.routes import bp
 from app.mqtt_client import init_mqtt
-from config import Config  
+from config import Config
+from app.iotelligence.routes import bp_ai
+from app.iotelligence.worker import init as init_ai_worker
+from sqlalchemy import text   # <<< importante para ejecutar SQL nativo
+
 
 def create_app():
     app = Flask(__name__)
-    app.config.from_object(Config)  
+    app.config.from_object(Config)
+
+    # (Opcional) ver la zona horaria detectada
+    print(f"[TZ] Usando zona horaria: {app.config.get('BACKEND_TZ', 'America/Caracas')}")
 
     db.init_app(app)
     app.register_blueprint(bp)
+    app.register_blueprint(bp_ai)  # IoTelligence comparte la misma URL
 
     with app.app_context():
         db.create_all()
 
+        # ⚡ Activar WAL y mejorar concurrencia en SQLite
+        try:
+            db.session.execute(text("PRAGMA journal_mode=WAL;"))
+            db.session.execute(text("PRAGMA synchronous=NORMAL;"))
+            db.session.commit()
+            print("[DB] WAL activado (journal_mode=WAL, synchronous=NORMAL)")
+        except Exception as e:
+            print(f"[DB] No se pudo activar WAL: {e}")
+
+    # Inicializa MQTT
     init_mqtt(app)
+
+    # <<< INICIALIZA EL WORKER DE IA (para jobs batch con app_context)
+    init_ai_worker(app, max_workers=4)
 
     # Manejadores globales de errores
     @app.errorhandler(404)

@@ -1,0 +1,32 @@
+{
+  "LGT0": {
+    "expected_modo": "horario",
+    "intervalo_min_s": 1,
+    "intervalo_max_s": 3600
+  },
+  "RGD0": {
+    "expected_modo": "horario",
+    "intervalo_min_s": 1,
+    "intervalo_max_s": 3600
+  },
+  "SHD0": {
+    "expected_modo": "horario",
+    "intervalo_min_s": 1,
+    "intervalo_max_s": 3600
+  },
+  "FAN0": {
+    "expected_modo": "horario",
+    "intervalo_min_s": 1,
+    "intervalo_max_s": 3600
+  },
+  "PLG0": {
+    "expected_modo": "horario",
+    "intervalo_min_s": 1,
+    "intervalo_max_s": 3600
+  },
+  "MOV0": {
+    "expected_modo": "horario",
+    "intervalo_min_s": 1,
+    "intervalo_max_s": 3600
+  }
+}

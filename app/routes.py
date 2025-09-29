@@ -4,6 +4,8 @@ from app.db import db
 from app.sse import subscribe, unsubscribe, publish as sse_publish
 import json, time
 from queue import Empty
+from datetime import datetime, timezone
+from app.iotelligence.core import dispatch_measure
 
 bp = Blueprint('routes', __name__)
 
@@ -121,6 +123,12 @@ def actualizar_dispositivo(id):
 
         db.session.commit()
 
+        # 🔔 Disparar Rule 2 (misconfig) por cambio de config vía HTTP
+        now = datetime.now(timezone.utc)
+        dispatch_measure(dispositivo, None, None, ts=now)
+
+        # (tu SSE de device_update puede ir antes o después, como prefieras)
+
         sse_publish({
             "id": dispositivo.id,
             "serial_number": dispositivo.serial_number,
@@ -213,42 +221,61 @@ def obtener_logs(id):
         return jsonify({"error": "Error al obtener logs", "detalle": str(e)}), 500
 
 
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+# opcional: from sqlalchemy.orm.exc import StaleDataError
+
 @bp.route('/dispositivos/reclamar', methods=['POST'])
 def reclamar_dispositivo():
     try:
-        data = request.get_json()
-        if not data or 'serial_number' not in data:
-            return jsonify({"error": "Debe proporcionar serial_number"}), 400
+        data = request.get_json() or {}
+        serial = data.get('serial_number')
+        if not serial:
+            return jsonify({"error":"Debe proporcionar serial_number"}), 400
 
-        serial = data['serial_number']
-        dispositivo = Dispositivo.query.filter_by(serial_number=serial).first()
+        disp = Dispositivo.query.filter_by(serial_number=serial).first()
+        if not disp:
+            return jsonify({"error":"Dispositivo no encontrado. Asegúrese de que haya sido detectado por MQTT"}), 404
 
-        if not dispositivo:
-            return jsonify({"error": "Dispositivo no encontrado. Asegúrese de que haya sido detectado por MQTT"}), 404
+        if disp.reclamado:
+            return jsonify({"error":"El dispositivo ya fue reclamado previamente"}), 409
 
-        # 🚫 Nuevo: impedir reclamos duplicados
-        if dispositivo.reclamado:
-            return jsonify({"error": "El dispositivo ya fue reclamado previamente"}), 409
-
-        # ✅ Actualizar datos solo si vienen en el payload
-        if "nombre" in data:       dispositivo.nombre = data["nombre"]
-        if "tipo" in data:         dispositivo.tipo = data["tipo"]
-        if "modelo" in data:       dispositivo.modelo = data["modelo"]
-        if "descripcion" in data:  dispositivo.descripcion = data["descripcion"]
+        # Actualiza SOLO si vienen campos
+        if "nombre" in data:       disp.nombre = data["nombre"]
+        if "tipo" in data:         disp.tipo = data["tipo"]
+        if "modelo" in data:       disp.modelo = data["modelo"]
+        if "descripcion" in data:  disp.descripcion = data["descripcion"]
         if "configuracion" in data:
-            dispositivo.configuracion = data["configuracion"]
+            cfg = dict(disp.configuracion or {})
+            cfg.update(data["configuracion"] or {})
+            disp.configuracion = cfg
 
-        dispositivo.reclamado = True
+        disp.reclamado = True
 
-        db.session.commit()
-        return jsonify({
-            "mensaje": "Dispositivo reclamado correctamente",
-            "id": dispositivo.id
-        }), 200
+        # Captura primitivos ANTES de commit
+        disp_id = disp.id
+
+        try:
+            db.session.commit() # guarda reclamado y cualquier config inicial
+            #Dispara Rule2
+            now = datetime.now(timezone.utc)
+            dispatch_measure(disp, None, None, ts=now)
+        except IntegrityError as e:
+            db.session.rollback()
+            return jsonify({"error":"Conflicto al reclamar", "detalle": str(e)}), 409
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            # Reintento blando: vuelve a leer y verifica estado
+            disp = Dispositivo.query.filter_by(serial_number=serial).first()
+            if disp and disp.reclamado:
+                return jsonify({"mensaje":"Dispositivo reclamado correctamente", "id": disp.id}), 200
+            return jsonify({"error":"Error al reclamar dispositivo", "detalle": str(e)}), 500
+
+        # ✅ No toques disp aquí (evita refrescos implícitos)
+        return jsonify({"mensaje":"Dispositivo reclamado correctamente", "id": disp_id}), 200
 
     except Exception as e:
         db.session.rollback()
-        return jsonify({"error": "Error al reclamar dispositivo", "detalle": str(e)}), 500
+        return jsonify({"error":"Error al reclamar dispositivo", "detalle": str(e)}), 500
 
 
 # Nuevo endpoint para obtener dispositivos no reclamados

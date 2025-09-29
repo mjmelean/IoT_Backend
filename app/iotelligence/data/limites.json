@@ -1,0 +1,36 @@
+{
+  "TMP0": {
+    "temperatura": {
+      "min": 10.0,
+      "max": 80.0
+    },
+    "humedad": {
+      "min": 20,
+      "max": 80
+    }
+  },
+  "CO20": {
+    "co2_ppm": {
+      "min": 0,
+      "max": 800
+    }
+  },
+  "LUX0": {
+    "luz_lux": {
+      "min": 0,
+      "max": 800
+    }
+  },
+  "SND0": {
+    "db": {
+      "min": 0,
+      "max": 100
+    }
+  },
+  "PLG0": {
+    "consumo_w": {
+      "min": 0.0,
+      "max": 2500.0
+    }
+  }
+}

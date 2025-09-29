@@ -17,7 +17,9 @@ DEFAULT_IGNORE_PATTERNS = [
     '*.db',
     '*.iml',
     '*.swp',
-    '*.swo'
+    '*.swo',
+    '*.db',
+    '*.db-journal'
 ]
 
 # Archivos y directorios que siempre se ignoran sin importar el .gitignore

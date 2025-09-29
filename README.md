@@ -12,18 +12,30 @@ Soporta tanto **dispositivos físicos** como **dispositivos simulados** y **actu
 ## 📁 Estructura del Proyecto
 
 ```
-|--config.py
-|--requirements.txt
-|--run.py
-|--app/
-|   |--db.py
-|   |--models.py
-|   |--mqtt_client.py
-|   |--routes.py
-|   |--sse.py
-|   |--__init__.py
-|--instance/
-|   |--iot.db
+    |--config.py
+    |--requirements.txt
+    |--run.py
+    |--app/
+        |--db.py
+        |--models.py
+        |--mqtt_client.py
+        |--routes.py
+        |--sse.py
+        |--utils_time.py
+        |--__init__.py
+        |--iotelligence/
+            |--core.py
+            |--routes.py
+            |--worker.py
+            |--data/
+                |--estandar.json
+                |--limites.json
+            |--rules/
+                |--base.py
+                |--rule1.py
+                |--rule2.py
+                |--__init__.py
+    |--instance/
 ```
 
 - `app/__init__.py` ⚙️ — Inicializa la app Flask, base de datos y MQTT.  
@@ -266,4 +278,108 @@ curl -X POST http://192.168.0.106:5000/dispositivos/reclamar   -H "Content-Type:
 ```
 
 ---
+  
 
+## ⚖️ IoTelligence Rules
+
+  
+
+Además de la gestión básica de dispositivos, este backend incluye un motor de **reglas de IA** que monitorea automáticamente el comportamiento y configuración de los dispositivos.
+
+Las notificaciones de reglas se emiten en tiempo real por **SSE** en el endpoint `/stream/ai`.
+
+  
+
+### 📏 Rule 1 — Valores Extremos (`extremos`)
+
+- Evalúa métricas **numéricas** (`temperatura`, `humedad`, `watts`, etc.).
+
+- Usa dos fuentes para definir límites aceptables:
+
+1.  **`limites.json`** → valores estáticos por tipo de dispositivo.
+
+2.  **Histórico** → percentiles calculados en base a registros previos.
+
+- Si el valor se sale de los límites (con tolerancia configurable), emite:
+
+```json
+
+{
+"event":  "ai_anomaly",
+"rule":  "extremos",
+"dispositivo_id":  1,
+"serial_number":  "TMP0123...",
+"metric":  "temperatura",
+"value":  120.5,
+"bounds": {"min":  10, "max":  80, "source":  "limits"},
+"ts_local":  "...",
+"ts_utc":  "..."
+}
+
+```
+
+  
+
+### ⚙️ Rule 2 — Misconfiguración (`misconfig`)
+
+- Evalúa la **configuración declarada** de un dispositivo (`configuracion` en BD).
+
+- Reglas mínimas definidas en **`estandar.json`**:
+
+- El dispositivo debe estar en **modo `horario`**.
+
+- El `intervalo_envio` debe estar dentro del rango `[min, max]`.
+
+- Si no cumple, se genera un aviso con sugerencia de corrección:
+
+```json
+
+{
+"event":  "ai_misconfig",
+"rule":  "misconfig",
+"dispositivo_id":  1,
+"serial_number":  "RGD0...",
+"issues": ["config.modo = 'manual' → se recomienda 'horario'"],
+"suggested_patch": {"configuracion": {"modo":  "horario"}},
+"severity":  "low",
+"ts_local":  "...",
+"ts_utc":  "..."
+}
+```
+  
+
+### 🔔 SSE en `/stream/ai`
+
+Eventos posibles:
+
+-  `ai_anomaly` → regla 1 (valores fuera de rango).
+
+-  `ai_misconfig` → regla 2 (configuración incorrecta).
+
+  
+---
+
+## ⚙️ Configuración IoTelligence (`config.py`)
+
+La lógica de IoTelligence se controla con parámetros configurables en `config.py`.  
+Estos valores permiten ajustar la sensibilidad y frecuencia de las notificaciones.
+
+### 🔹 Rule 1 – Anomalías en métricas (`ai_anomaly`)
+- **AI_HIST_MIN_POINTS**: número mínimo de lecturas necesarias para calcular límites basados en histórico (ej. 150).
+- **AI_HIST_WINDOW_DAYS**: ventana de tiempo en días para usar datos históricos.
+- **AI_HIST_PMIN / AI_HIST_PMAX**: percentiles que definen el rango normal de la métrica (ej. 1% – 99%).
+- **AI_HIST_PAD_FRAC**: margen adicional (en %) alrededor de los límites históricos (ej. 5%).
+- **AI_HIST_PAD_ABS**: margen absoluto extra en las unidades de la métrica.
+- **AI_ALERT_TOL_FRAC**: tolerancia relativa (%) antes de disparar la alerta.
+- **AI_ALERT_TOL_ABS**: tolerancia absoluta en unidades (ej. 0.5°C).  
+  > La tolerancia final será el valor **mayor** entre tolerancia absoluta y fraccional.
+- **AI_ALERT_COOLDOWN_S**: tiempo de enfriamiento (segundos) entre notificaciones de la misma métrica/dispositivo para evitar spam.
+
+### 🔹 Rule 2 – Misconfiguraciones (`ai_misconfig`)
+- **AI_MISCONFIG_COOLDOWN_S**: tiempo mínimo (segundos) entre notificaciones de configuración incorrecta para un mismo dispositivo.  
+  > Solo se notifica en la transición de **OK → MISCONFIG**. Si sigue en error, no se repite hasta que termine el cooldown.
+
+---
+
+👉 Estos parámetros permiten balancear entre **sensibilidad** y **ruido de alertas**.  
+En pruebas locales se recomienda usar valores bajos (ej. cooldown de 60s).  

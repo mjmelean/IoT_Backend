@@ -1,10 +1,13 @@
+# app/mqtt_client.py
 import json
+from datetime import datetime, timezone               # <<< IoTelligence
 from flask import current_app
 from flask_mqtt import Mqtt
 from app.models import Dispositivo, EstadoLog
 from app.db import db
 from sqlalchemy.exc import IntegrityError
 from app.sse import publish as sse_publish
+from app.iotelligence.core import dispatch_measure            # <<< IoTelligence
 
 mqtt = Mqtt()
 
@@ -82,6 +85,8 @@ def init_mqtt(app):
                     )
                     db.session.add(log)
                     db.session.commit()
+
+                    # Notificar a la vista normal
                     sse_publish({
                         "id": dispositivo.id,
                         "serial_number": dispositivo.serial_number,
@@ -96,6 +101,19 @@ def init_mqtt(app):
                         "event": "device_update"
                     })
                     print(f"[MQTT] 📒 Estado log registrado: {serial} -> {estado} | Parámetros: {parametros}")
+
+                    # ===============================
+                    # IoTelligence: Reglas (ONLINE)
+                    # ===============================
+
+                    # 1) Reglas de metricas (Rule 1: extremos)
+                    now = datetime.now(timezone.utc)
+                    for metric, val in (dispositivo.parametros or {}).items():
+                        dispatch_measure(dispositivo, metric, val, ts=now)
+                    # (Si el dispositivo no tiene métricas numéricas en `parametros`, no hace nada)
+
+                    # 2) Reglas de configuracion / no numericas (Rule 2: MisConfigs)
+                    dispatch_measure(dispositivo, None, None, ts=now)
 
             except Exception as e:
                 print("[MQTT ERROR]", e)

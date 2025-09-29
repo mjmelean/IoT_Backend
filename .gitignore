@@ -1,6 +1,12 @@
 # Directorios de caché y compilados de Python
 __pycache__/
 
+#archivos de base de datos y textify
+iot.db-journal
+iot.db-shm
+iot.db-wal
+back.txt
+
 # Archivos compilados sueltos
 *.pyc
 

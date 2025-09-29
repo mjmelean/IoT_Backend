@@ -1,4 +1,14 @@
-Flask
-Flask-MQTT
-Flask-SQLAlchemy
-paho-mqtt
+# --- Core Flask ---
+Flask==2.3.2
+Flask-MQTT==1.1.1
+Flask-SQLAlchemy==3.0.5
+
+# --- MQTT ---
+paho-mqtt==1.6.1
+
+# --- Timezones ---
+tzlocal==5.2
+tzdata==2024.1
+
+# --- Utilidades ---
+python-dotenv==1.0.0
