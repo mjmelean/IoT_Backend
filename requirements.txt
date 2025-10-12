@@ -12,3 +12,6 @@ tzdata==2024.1
 
 # --- Utilidades ---
 python-dotenv==1.0.0
+
+# --- IA-River ---
+river>=0.21

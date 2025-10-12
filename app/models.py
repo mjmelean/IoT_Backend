@@ -1,3 +1,4 @@
+# app/models.py
 from app.db import db
 from sqlalchemy.dialects.sqlite import JSON
 from datetime import datetime

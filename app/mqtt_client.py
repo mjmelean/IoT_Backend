@@ -102,18 +102,24 @@ def init_mqtt(app):
                     })
                     print(f"[MQTT] 📒 Estado log registrado: {serial} -> {estado} | Parámetros: {parametros}")
 
+                    # ...
                     # ===============================
                     # IoTelligence: Reglas (ONLINE)
                     # ===============================
-
-                    # 1) Reglas de metricas (Rule 1: extremos)
                     now = datetime.now(timezone.utc)
+
+                    # 1) Reglas de métricas (Rule1…) — SI HAY métricas numéricas
                     for metric, val in (dispositivo.parametros or {}).items():
                         dispatch_measure(dispositivo, metric, val, ts=now)
-                    # (Si el dispositivo no tiene métricas numéricas en `parametros`, no hace nada)
 
-                    # 2) Reglas de configuracion / no numericas (Rule 2: MisConfigs)
+                    # 1.b) Heartbeat SIEMPRE (garantiza “visto” para Rule4)
+                    dispatch_measure(dispositivo, "heartbeat", 1, ts=now)
+
+                    # 2) Reglas de configuración (Rule2: Misconfigs)
                     dispatch_measure(dispositivo, None, None, ts=now)
+
+                    # 3) Reglas de aprendizaje/estado (Rule3, etc.)
+                    dispatch_measure(dispositivo, "__state__", None, ts=now)
 
             except Exception as e:
                 print("[MQTT ERROR]", e)

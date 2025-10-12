@@ -28,12 +28,15 @@ Soporta tanto **dispositivos físicos** como **dispositivos simulados** y **actu
             |--routes.py
             |--worker.py
             |--data/
+                |--river_models.json
                 |--estandar.json
                 |--limites.json
             |--rules/
                 |--base.py
                 |--rule1.py
                 |--rule2.py
+                |--rule3.py
+                |--rule4.py
                 |--__init__.py
     |--instance/
 ```
@@ -282,28 +285,21 @@ curl -X POST http://192.168.0.106:5000/dispositivos/reclamar   -H "Content-Type:
 
 ## ⚖️ IoTelligence Rules
 
-  
-
 Además de la gestión básica de dispositivos, este backend incluye un motor de **reglas de IA** que monitorea automáticamente el comportamiento y configuración de los dispositivos.
 
 Las notificaciones de reglas se emiten en tiempo real por **SSE** en el endpoint `/stream/ai`.
 
-  
 
 ### 📏 Rule 1 — Valores Extremos (`extremos`)
 
 - Evalúa métricas **numéricas** (`temperatura`, `humedad`, `watts`, etc.).
-
 - Usa dos fuentes para definir límites aceptables:
-
 1.  **`limites.json`** → valores estáticos por tipo de dispositivo.
-
 2.  **Histórico** → percentiles calculados en base a registros previos.
 
 - Si el valor se sale de los límites (con tolerancia configurable), emite:
 
 ```json
-
 {
 "event":  "ai_anomaly",
 "rule":  "extremos",
@@ -315,17 +311,12 @@ Las notificaciones de reglas se emiten en tiempo real por **SSE** en el endpoint
 "ts_local":  "...",
 "ts_utc":  "..."
 }
-
 ```
-
-  
 
 ### ⚙️ Rule 2 — Misconfiguración (`misconfig`)
 
 - Evalúa la **configuración declarada** de un dispositivo (`configuracion` en BD).
-
 - Reglas mínimas definidas en **`estandar.json`**:
-
 - El dispositivo debe estar en **modo `horario`**.
 
 - El `intervalo_envio` debe estar dentro del rango `[min, max]`.
@@ -333,7 +324,6 @@ Las notificaciones de reglas se emiten en tiempo real por **SSE** en el endpoint
 - Si no cumple, se genera un aviso con sugerencia de corrección:
 
 ```json
-
 {
 "event":  "ai_misconfig",
 "rule":  "misconfig",
@@ -346,40 +336,181 @@ Las notificaciones de reglas se emiten en tiempo real por **SSE** en el endpoint
 "ts_utc":  "..."
 }
 ```
-  
+
+### 🧠 Rule 3 — Aprendizaje de Horarios  (`learn`)
+
+- Aprende patrones de encendido/apagado por día de la semana y hora, y sugiere ventanas de operación.
+
+- Modo real (online): modelo incremental (River) entrenado con la señal de estado/encendido.:
+
+-  Post-procesado: une bins cercanos, redondea a minutos y limita nº de ventanas por día.
+
+- Auditoría: si el dispositivo ya está en modo="horario", compara lo aprendido vs lo configurado y propone cambios solo si la diferencia supera un umbral.
+
+**Modo Demo (opcional)**:
+
+- Permite sugerencias sin entrenar en vivo.
+
+- Fuente de datos: CSV o PKL por serial (whitelist de seriales demo).
+
+- Útil para demos: genera sugerencias consistentes y replicables.
+
+- Nombres de archivos esperados (por serial):
+
+	- Modelo River: app/iotelligence/data/river_models/<SERIAL>.river.pkl
+
+	- CSV demo: app/iotelligence/data/river_models/<SERIAL>.csv
+
+	> Si AI_R3_DEMO_REQUIRE_FILES=True, solo se sugerirá para seriales listados en AI_R3_DEMO_SERIALS y con archivo presente.
+
+```json
+{
+  "event": "ai_suggest",
+  "rule": "learn",
+  "dispositivo_id": 2,
+  "serial_number": "RGD0ABC123",
+  "suggested_horarios": {
+    "lunes": [ {"inicio":"06:00","fin":"06:30"}, {"inicio":"18:00","fin":"18:30"} ],
+    "jueves": [ {"inicio":"08:30","fin":"09:00"} ]
+  },
+  "bin_minutes": 30,
+  "threshold": 0.55,
+  "ts_local": "..."
+}
+```
+
+
+### 🛑 Rule 4 — Watchdog Offlines  (`offline`)
+
+- Detecta cuando un dispositivo reclamado deja de emitir durante un tiempo configurable.
+	- Emite ai_offline al detectar la caída y, al regresar, ai_back_online.
+
+```json
+Ejemplo ai_offline:
+
+{
+  "event": "ai_offline",
+  "rule": "offline",
+  "dispositivo_id": 1,
+  "serial_number": "TMP07JDE1RMQ",
+  "seconds_offline": 129,
+  "since_ts_local": "...",
+  "ts_local": "...",
+  "severity": "medium"
+}
+
+Ejemplo ai_back_online:
+
+{
+  "event": "ai_back_online",
+  "rule": "offline",
+  "dispositivo_id": 1,
+  "serial_number": "TMP07JDE1RMQ",
+  "was_offline_secs": 149,
+  "ts_local": "...",
+  "severity": "info"
+}
+```
 
 ### 🔔 SSE en `/stream/ai`
 
+  
+
 Eventos posibles:
 
+  
+
 -  `ai_anomaly` → regla 1 (valores fuera de rango).
+
+  
 
 -  `ai_misconfig` → regla 2 (configuración incorrecta).
 
   
+
 ---
+
+  
 
 ## ⚙️ Configuración IoTelligence (`config.py`)
 
-La lógica de IoTelligence se controla con parámetros configurables en `config.py`.  
+  
+
+La lógica de IoTelligence se controla con parámetros configurables en `config.py`.
+
 Estos valores permiten ajustar la sensibilidad y frecuencia de las notificaciones.
 
+  
+
 ### 🔹 Rule 1 – Anomalías en métricas (`ai_anomaly`)
-- **AI_HIST_MIN_POINTS**: número mínimo de lecturas necesarias para calcular límites basados en histórico (ej. 150).
-- **AI_HIST_WINDOW_DAYS**: ventana de tiempo en días para usar datos históricos.
-- **AI_HIST_PMIN / AI_HIST_PMAX**: percentiles que definen el rango normal de la métrica (ej. 1% – 99%).
-- **AI_HIST_PAD_FRAC**: margen adicional (en %) alrededor de los límites históricos (ej. 5%).
-- **AI_HIST_PAD_ABS**: margen absoluto extra en las unidades de la métrica.
-- **AI_ALERT_TOL_FRAC**: tolerancia relativa (%) antes de disparar la alerta.
-- **AI_ALERT_TOL_ABS**: tolerancia absoluta en unidades (ej. 0.5°C).  
-  > La tolerancia final será el valor **mayor** entre tolerancia absoluta y fraccional.
-- **AI_ALERT_COOLDOWN_S**: tiempo de enfriamiento (segundos) entre notificaciones de la misma métrica/dispositivo para evitar spam.
+
+-  **AI_HIST_MIN_POINTS**: número mínimo de lecturas necesarias para calcular límites basados en histórico (ej. 150).
+
+-  **AI_HIST_WINDOW_DAYS**: ventana de tiempo en días para usar datos históricos.
+
+-  **AI_HIST_PMIN / AI_HIST_PMAX**: percentiles que definen el rango normal de la métrica (ej. 1% – 99%).
+
+-  **AI_HIST_PAD_FRAC**: margen adicional (en %) alrededor de los límites históricos (ej. 5%).
+
+-  **AI_HIST_PAD_ABS**: margen absoluto extra en las unidades de la métrica.
+
+-  **AI_ALERT_TOL_FRAC**: tolerancia relativa (%) antes de disparar la alerta.
+
+-  **AI_ALERT_TOL_ABS**: tolerancia absoluta en unidades (ej. 0.5°C).
+
+> La tolerancia final será el valor **mayor** entre tolerancia absoluta y fraccional.
+
+-  **AI_ALERT_COOLDOWN_S**: tiempo de enfriamiento (segundos) entre notificaciones de la misma métrica/dispositivo para evitar spam.
+
+  
 
 ### 🔹 Rule 2 – Misconfiguraciones (`ai_misconfig`)
-- **AI_MISCONFIG_COOLDOWN_S**: tiempo mínimo (segundos) entre notificaciones de configuración incorrecta para un mismo dispositivo.  
-  > Solo se notifica en la transición de **OK → MISCONFIG**. Si sigue en error, no se repite hasta que termine el cooldown.
+
+-  **AI_MISCONFIG_COOLDOWN_S**: tiempo mínimo (segundos) entre notificaciones de configuración incorrecta para un mismo dispositivo.
+
+> Solo se notifica en la transición de **OK → MISCONFIG**. Si sigue en error, no se repite hasta que termine el cooldown.
+
+### 🔹 Rule 3 – Learn (`ai_suggest`)
+
+Resolución/umbral: AI_R3_BIN_MINUTES, AI_R3_PROB_THRESH, AI_R3_MIN_SPAN_BINS
+
+Modelo: AI_R3_MODEL_DIR, AI_R3_SAVE_EVERY_N, AI_R3_WARM_START, AI_R3_RESET_ON_START
+
+Sugerencias: AI_R3_COOLDOWN_S, AI_R3_MIN_EVENTS, AI_R3_SUGGEST_MIN_DIFF
+
+Post-procesado: AI_R3_MIN_GAP_BINS, AI_R3_ROUND_TO_MIN, AI_R3_MAX_WINDOWS_PER_DAY
+
+Auditoría vs horario: AI_R3_AUDIT_WHEN_HORARIO, AI_R3_DIFF_THRESH
+
+Modo demo:
+
+AI_R3_DEMO_MODE = True|False
+
+AI_R3_DEMO_SOURCE = "csv"|"pkl"
+
+AI_R3_DEMO_CSV_DIR = "app/iotelligence/data/river_models"
+
+AI_R3_DEMO_TOPK_PER_DAY = 0 (0 = sin límite por día)
+
+AI_R3_DEMO_SERIALS = ["RGD0ABC123"]
+
+AI_R3_DEMO_REQUIRE_FILES = True
+
+  
+ ### 🔹 Rule 4 – Offline (`ai_offline / ai_back_online`)
+
+AI_R4_OFFLINE_SECS (segundos sin señal para considerarlo offline)
+
+AI_R4_WATCHDOG_TICK_SECS (intervalo de revisión)
+
+AI_R4_REMIND_SECS (recordatorios mientras sigue offline; 0 = desactivado)
+
+AI_R4_STARTUP_GRACE_SECS (gracia al arrancar el backend)
 
 ---
 
-👉 Estos parámetros permiten balancear entre **sensibilidad** y **ruido de alertas**.  
-En pruebas locales se recomienda usar valores bajos (ej. cooldown de 60s).  
+  
+
+👉 Estos parámetros permiten balancear entre **sensibilidad** y **ruido de alertas**.
+
+En pruebas locales se recomienda usar valores bajos (ej. cooldown de 60s).

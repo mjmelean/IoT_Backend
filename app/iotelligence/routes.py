@@ -66,9 +66,10 @@ def stream_ai():
             while True:
                 try:
                     evt = q.get(timeout=5)
-                    # Solo eventos IA
+                    # Solo eventos IA            
                     if isinstance(evt, dict) and str(evt.get("event", "")).startswith("ai_"):
                         payload = json.dumps(evt, ensure_ascii=False, separators=(',', ':'))
+                        yield f"event: {evt.get('event')}\n"
                         yield f"data: {payload}\n\n"
                 except Empty:
                     # keep-alive

@@ -52,19 +52,19 @@ def _std_for(serial: str) -> Optional[Dict[str, Any]]:
             return rules
     return None
 
-# ========= ESTADO EN MEMORIA + COOLDOWN =========
+# ========= ESTADO EN MEMORIA + COOLDOWN / REMINDERS =========
 _STATE_LOCK = threading.Lock()
 _MISCONFIG_STATE: Dict[int, bool] = {}   # True si está en misconfig; False/None si OK
 _LAST_NOTIFY_TS: Dict[int, float] = {}   # última notificación por dispositivo (epoch)
 
-def _cooldown_seconds_default() -> int:
-    """Cooldown global por config; fallback 3600s."""
+def _detect_cooldown_global() -> int:
+    """Cooldown global por config; fallback 3600s (para la PRIMERA alerta)."""
     try:
         return int(current_app.config.get("AI_MISCONFIG_COOLDOWN_S", 3600))
     except Exception:
         return 3600
 
-def _cooldown_seconds_for(disp: Dispositivo) -> int:
+def _detect_cooldown_for(disp: Dispositivo) -> int:
     """
     Si el estandar del prefijo define 'misconfig_cooldown_s', lo usa.
     Si no, usa el global AI_MISCONFIG_COOLDOWN_S.
@@ -75,31 +75,51 @@ def _cooldown_seconds_for(disp: Dispositivo) -> int:
             return int(std["misconfig_cooldown_s"])
     except Exception:
         pass
-    return _cooldown_seconds_default()
+    return _detect_cooldown_global()
 
-def _should_notify(disp_id: int, new_state_is_misconfig: bool, cooldown_s: int) -> bool:
+def _remind_enabled() -> bool:
+    return bool(current_app.config.get("AI_MISCONFIG_REMIND", False))
+
+def _remind_cooldown_s() -> int:
+    try:
+        return int(current_app.config.get("AI_MISCONFIG_REMIND_COOLDOWN_S", 900))
+    except Exception:
+        return 900
+
+def _should_notify(disp_id: int, new_state_is_misconfig: bool, detect_cd_s: int) -> bool:
     """
-    Notifica SOLO en transición OK -> MISCONFIG y respetando cooldown_s.
-    Si permanece en MISCONFIG, no repite hasta que pase el cooldown.
-    Al volver a OK, se resetea y podrá volver a notificar.
+    - OK -> MISCONFIG: notifica si pasó detect_cd_s (antirrebote).
+    - Sigue en MISCONFIG: si REMIND=True, re-notifica cada remind_cooldown.
+    - MISCONFIG -> OK: resetea estado (no notifica).
     """
     now = time.time()
-    cd = int(cooldown_s)
+    detect_cd = int(detect_cd_s)
+    remind_cd = _remind_cooldown_s()
+    remind_on = _remind_enabled()
+
     with _STATE_LOCK:
         prev_state = _MISCONFIG_STATE.get(disp_id, False)
-        last_ts = _LAST_NOTIFY_TS.get(disp_id, 0.0)
+        last_any = _LAST_NOTIFY_TS.get(disp_id, 0.0)
 
-        if new_state_is_misconfig and not prev_state:
-            if now - last_ts >= cd:
+        if new_state_is_misconfig:
+            if not prev_state:
+                # transición OK -> MISCONFIG
+                if now - last_any >= detect_cd:
+                    _MISCONFIG_STATE[disp_id] = True
+                    _LAST_NOTIFY_TS[disp_id] = now
+                    return True
                 _MISCONFIG_STATE[disp_id] = True
-                _LAST_NOTIFY_TS[disp_id] = now
-                return True
-            _MISCONFIG_STATE[disp_id] = True
-            return False
-        elif not new_state_is_misconfig and prev_state:
-            _MISCONFIG_STATE[disp_id] = False
-            return False
+                return False
+            else:
+                # persiste en MISCONFIG → ¿recordatorio?
+                if remind_on and (now - last_any >= remind_cd):
+                    _LAST_NOTIFY_TS[disp_id] = now
+                    return True
+                return False
         else:
+            # MISCONFIG -> OK (o se mantiene OK)
+            if prev_state:
+                _MISCONFIG_STATE[disp_id] = False
             return False
 
 # ========= LÓGICA DE EVALUACIÓN (solo modo + intervalo_envio) =========
@@ -162,9 +182,9 @@ class Rule2Misconfig(Rule):
 
         res = _evaluate(dispositivo)
         is_misconfig = bool(res)
-        cd = _cooldown_seconds_for(dispositivo)
+        detect_cd = _detect_cooldown_for(dispositivo)
 
-        if _should_notify(dispositivo.id, is_misconfig, cd) and is_misconfig:
+        if _should_notify(dispositivo.id, is_misconfig, detect_cd) and is_misconfig:
             ts_utc = ts or now_utc()
             sse_publish({
                 "event": "ai_misconfig",
@@ -179,14 +199,15 @@ class Rule2Misconfig(Rule):
             })
 
     def run_batch(self, dispositivo: Dispositivo, **kwargs):
+        # Batch opcional para evaluar una vez bajo demanda (misma lógica de notify)
         if not getattr(dispositivo, "reclamado", False):
             return {"skipped": "unclaimed"}
 
         res = _evaluate(dispositivo)
         is_misconfig = bool(res)
-        cd = _cooldown_seconds_for(dispositivo)
+        detect_cd = _detect_cooldown_for(dispositivo)
 
-        if _should_notify(dispositivo.id, is_misconfig, cd) and is_misconfig:
+        if _should_notify(dispositivo.id, is_misconfig, detect_cd) and is_misconfig:
             ts_utc = now_utc()
             sse_publish({
                 "event": "ai_misconfig",

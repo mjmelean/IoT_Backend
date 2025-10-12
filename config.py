@@ -1,3 +1,4 @@
+# config.py
 import os
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -38,7 +39,7 @@ class Config:
 
     # --- IOTELLIGENCE ---
 
-    # Notificaciones Rule1 (ai anomaly)
+    # Notificaciones Rule1 (ai anomaly) ------------------------------------------------------------
     AI_HIST_MIN_POINTS = 150     # lecturas mínimas para usar histórico puro
     AI_HIST_WINDOW_DAYS = 30    # ventana histórica
     AI_HIST_PMIN = 1.0          # percentil inferior
@@ -50,9 +51,53 @@ class Config:
     AI_ALERT_TOL_FRAC = 0.02    # 2% del rango final
     AI_ALERT_TOL_ABS  = 0.5     # o 0.5 unidades (lo que sea mayor)
 
-    # Notificaciones Rule2 (misconfig)
-    AI_MISCONFIG_COOLDOWN_S = 60  # Tiempo de espera hasta volver a revisar una config
-    
+    # Notificaciones Rule2 (misconfig) ------------------------------------------------------------
+    AI_MISCONFIG_DETECT_COOLDOWN_S = 5   # antirrebote para la 1ª alerta al caer en misconfig
+    AI_MISCONFIG_REMIND = True            # si sigue en misconfig, enviar recordatorios
+    AI_MISCONFIG_REMIND_COOLDOWN_S = 20  # cada cuánto recordar (p. ej. 15 min)
+        
+    # Notificaciones Rule3 (River)     ------------------------------------------------------------
+    AI_R3_BIN_MINUTES = 30
+    AI_R3_PROB_THRESH = 0.55
+    AI_R3_MIN_SPAN_BINS = 1
+    AI_R3_MODEL_DIR = "app/iotelligence/data/river_models"
 
-    
+    AI_R3_SAVE_EVERY_N = 50
+    AI_R3_COOLDOWN_S = 200
+    AI_R3_MIN_EVENTS = 0
 
+    AI_R3_WARM_START = True
+    AI_R3_RESET_ON_START = False
+    AI_R3_AUDIT_WHEN_HORARIO = True
+    AI_R3_DIFF_THRESH = 0.30
+
+    # Post-procesado de ventanas
+    AI_R3_MIN_GAP_BINS = 1      # fusiona huecos pequeños
+    AI_R3_ROUND_TO_MIN = 30     # redondea inicios (down) y fines (up)
+    AI_R3_MAX_WINDOWS_PER_DAY = 2
+
+    # Hysteresis de sugerencias (evita spam si casi no cambió)
+    AI_R3_SUGGEST_MIN_DIFF = 0.05  # 5%
+
+    # DEMO: Para demostracion
+    # Activar Modo demo
+    AI_R3_DEMO_MODE = True
+    # Tipo de archivo csv/pkl
+    AI_R3_DEMO_SOURCE = "csv" #pkl or csv
+    # Ubicacion de archivo
+    AI_R3_DEMO_CSV_DIR = "app/iotelligence/data/river_models"
+    AI_R3_DEMO_TOPK_PER_DAY = 0
+    # Seriales permitidos para aplicar modo demo
+    AI_R3_DEMO_SERIALS = ["RGD0ABC123"]
+    # Requerido archivos
+    AI_R3_DEMO_REQUIRE_FILES = True
+
+    # Notificaciones Rule4 (offline watchdog) ------------------------------------------------------------
+    # Tiempo sin recibir medidas para considerar OFFLINE
+    AI_R4_OFFLINE_SECS = 60          # p.ej. 60s (ajústalo a tu caso)
+    # Cada cuánto revisa el watchdog en segundo plano
+    AI_R4_WATCHDOG_TICK_SECS = 10    # p.ej. cada 10s
+    # Recordatorios mientras siga offline (0 = sin recordatorios)
+    AI_R4_REMIND_SECS = 60         # p.ej. cada 5 min
+    # Periodo de gracia al arrancar el backend para evitar falsos positivos
+    AI_R4_STARTUP_GRACE_SECS = 30    # p.ej. 30s

@@ -1,3 +1,4 @@
+#app/routes.py
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 from app.models import Dispositivo, EstadoLog
 from app.db import db
@@ -328,7 +329,6 @@ def stream_dispositivos():
     SSE para cambios de dispositivos:
     - JSON compacto (menos bytes)
     - Heartbeat 'ping' cada ~25s para evitar timeouts
-    - Filtros opcionales: ?serial=... & ?reclamado=true|false
     """
     serial_filter = request.args.get('serial')
     recl_filter   = request.args.get('reclamado')
@@ -340,15 +340,22 @@ def stream_dispositivos():
             last_ping = time.time()
             while True:
                 try:
-                    # Espera evento hasta 5s; si no llega, manda ping
                     evt = q.get(timeout=5)
 
-                    if serial_filter and evt.get("serial_number") != serial_filter:
-                        continue
-                    if recl_filter in ('true', 'false') and str(evt.get("reclamado")).lower() != recl_filter:
+                    # ⛔️ Excluir eventos de IA
+                    if isinstance(evt, dict) and str(evt.get("event","")).startswith("ai_"):
                         continue
 
-                    payload = json.dumps(evt, ensure_ascii=False, separators=(',', ':'))
+                    # Filtros opcionales
+                    if serial_filter and evt.get("serial_number") != serial_filter:
+                        continue
+                    if recl_filter in ('true','false') and str(evt.get("reclamado")).lower() != recl_filter:
+                        continue
+
+                    payload = json.dumps(evt, ensure_ascii=False, separators=(',',':'))
+                    # Opcional: usa nombre de evento si viene, o 'device_update' por defecto
+                    evname = evt.get("event") or "device_update"
+                    yield f"event: {evname}\n"
                     yield f"data: {payload}\n\n"
 
                 except Empty:
@@ -365,3 +372,4 @@ def stream_dispositivos():
         "Connection": "keep-alive",
     }
     return Response(stream_with_context(gen()), headers=headers)
+
