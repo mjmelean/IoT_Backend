@@ -27,7 +27,7 @@ class Config:
     BACKEND_TZ = "America/Caracas"
     
     # --- Dirección del backend (hardcodeada) ---
-    BACKEND_HOST = "localhost"   # escucha en todas las interfaces
+    BACKEND_HOST = "0.0.0.0"   # escucha en todas las interfaces
     BACKEND_PORT = 5000
     BACKEND_URL  = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 
@@ -36,6 +36,29 @@ class Config:
     MQTT_BROKER_PORT = 1883
     MQTT_KEEPALIVE = 60
     MQTT_TLS_ENABLED = False
+
+
+    # --- App Movil ---
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret")   # cámbialo en producción
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES", str(60 * 60 * 24)))  # 1 día (segundos)
+
+    # --- SMPT -----
+
+     # --- SMTP / Email (para envío de códigos de seguridad) ---
+    # Configurado para Gmail con App Password (recomendado).
+    # IMPORTANTE: usa SSL directo en 465 (NO STARTTLS). Si prefieres STARTTLS, cambia:
+    #   SMTP_PORT=587, SMTP_USE_SSL=0, SMTP_USE_TLS=1
+    SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))  # 465 = SSL directo
+    SMTP_USER = os.getenv("SMTP_USER", "smarthomeappiot2025@gmail.com")
+    # App Password proporcionada:
+    SMTP_PASS = os.getenv("SMTP_PASS", "cvkexbmjisiikxum")
+    # Nombre que aparecerá en el remitente
+    SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "Smarthome")
+    # Flags de seguridad (coherentes con el puerto 465 por defecto)
+    SMTP_USE_SSL = bool(int(os.getenv("SMTP_USE_SSL", "1")))  # SSL directo
+    SMTP_USE_TLS = bool(int(os.getenv("SMTP_USE_TLS", "0")))  # STARTTLS
+
 
     # --- IOTELLIGENCE ---
 

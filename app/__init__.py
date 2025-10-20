@@ -7,7 +7,7 @@ from config import Config
 from app.iotelligence.routes import bp_ai
 from app.iotelligence.worker import init as init_ai_worker
 from sqlalchemy import text   # <<< importante para ejecutar SQL nativo
-
+from flask_jwt_extended import JWTManager
 
 def create_app():
     app = Flask(__name__)
@@ -17,6 +17,7 @@ def create_app():
     print(f"[TZ] Usando zona horaria: {app.config.get('BACKEND_TZ', 'America/Caracas')}")
 
     db.init_app(app)
+    JWTManager(app)
     app.register_blueprint(bp)
     app.register_blueprint(bp_ai)  # IoTelligence comparte la misma URL
 
