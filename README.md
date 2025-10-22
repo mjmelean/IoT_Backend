@@ -7,6 +7,8 @@ Soporta tanto **dispositivos físicos** como **dispositivos simulados** y **actu
 
 > Para un entorno doméstico (≈20 dispositivos, 5 usuarios) el SSE es más que suficiente: latencia muy baja en LAN y complejidad mínima.
 
+> Para instalar el certificado, ir a ca/rootcadev/ e instalar rootCa.pem y rootCa-key.pemm (certificado valido para localhost y subred de windoes hotspot 192.168.137.1)
+
 ---
 
 ## 📁 Estructura del Proyecto

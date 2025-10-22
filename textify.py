@@ -28,7 +28,20 @@ HARDCODED_IGNORE_PATTERNS = [
     '.svn', # Carpeta de Subversion
     '.hg',  # Carpeta de Mercurial
     '.gitignore', # El propio archivo .gitignore
-    'README.md' # Archivo README.md
+    'README.md', # Archivo README.md
+    '*.csv', # multimedia ↓
+    '*.jpg',
+    '*.png',
+    '*.mp4',
+    '*.key', # certificados ↓
+    '*.crt',
+    '*.pem',
+    '*.db', # base de datos (wsgi) ↓
+    '*.iml',
+    '*.swp',
+    '*.swo',
+    '*.db',
+    '*.db-journal'
 ]
 
 def get_gitignore_patterns(folder_path):

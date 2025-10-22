@@ -5,6 +5,9 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 INSTANCE_DIR = os.path.join(BASE_DIR, 'instance')
 os.makedirs(INSTANCE_DIR, exist_ok=True)  # crea la carpeta si no existe
 
+# Ruta base del proyecto (un nivel arriba de app/)
+CA_DIR = os.path.join(BASE_DIR, "ca")  # carpeta donde se guarda server.crt.pem y server.key.pem
+
 class Config:
 
     # --- Hora del Backend ---
@@ -42,9 +45,8 @@ class Config:
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret")   # cámbialo en producción
     JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRES", str(60 * 60 * 24)))  # 1 día (segundos)
 
-    # --- SMPT -----
+    # --- SMTP / Email (para envío de códigos de seguridad) ---
 
-     # --- SMTP / Email (para envío de códigos de seguridad) ---
     # Configurado para Gmail con App Password (recomendado).
     # IMPORTANTE: usa SSL directo en 465 (NO STARTTLS). Si prefieres STARTTLS, cambia:
     #   SMTP_PORT=587, SMTP_USE_SSL=0, SMTP_USE_TLS=1
@@ -59,6 +61,16 @@ class Config:
     SMTP_USE_SSL = bool(int(os.getenv("SMTP_USE_SSL", "1")))  # SSL directo
     SMTP_USE_TLS = bool(int(os.getenv("SMTP_USE_TLS", "0")))  # STARTTLS
 
+    # --- Certificado Autofirmado -----
+    SSL_ENABLED = False
+    SSL_CERT_PATH = os.path.join(CA_DIR, "server.crt.pem")
+    SSL_KEY_PATH  = os.path.join(CA_DIR, "server.key.pem")
+
+    # URL base dinámica 
+    if SSL_ENABLED:
+        BACKEND_URL = f"https://{BACKEND_HOST}:{BACKEND_PORT}"
+    else:
+        BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 
     # --- IOTELLIGENCE ---
 
