@@ -1,5 +1,5 @@
 # app/routes.py
-from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app
+from flask import Blueprint, request, jsonify, Response, stream_with_context, current_app, send_file
 from app.models import Dispositivo, EstadoLog
 from app.db import db
 from app.models import (
@@ -8,7 +8,8 @@ from app.models import (
     Habitacion,
     User,
     UserProfileExtra,   # perfil extra (avatar + preferencia de tema)
-    SecurityCode        # códigos de seguridad (cambio contraseña y forgot/registro)
+    SecurityCode,       # códigos de seguridad (cambio contraseña y forgot/registro)
+    AccionLog           # <-- NUEVO: para auditoría/eventos de negocio
 )
 from app.sse import subscribe, unsubscribe, publish as sse_publish
 import json, time
@@ -29,6 +30,11 @@ from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identi
 from werkzeug.utils import secure_filename
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from app.iotelligence.dev_kinds import infer_kind, infer_capability
+
+# NUEVO: utilidades para exportar Excel
+import io
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 
 bp = Blueprint('routes', __name__)
 
@@ -51,6 +57,30 @@ def _disp_payload(d: Dispositivo) -> dict:
         "kind": kind,
         "capability": capability,
     }
+
+# -------------------------------------------------------------------
+# NUEVO: Helper para registrar acciones (auditoría AccionLog)
+# -------------------------------------------------------------------
+def _actor_tag() -> str:
+    # Si hay usuario autenticado devolvemos 'user', si no 'system'
+    try:
+        uid = get_jwt_identity()
+        return "user" if uid is not None else "system"
+    except Exception:
+        return "system"
+
+def _log_action(dispositivo_id: int, evento: str, detalle: dict | None = None, actor: str | None = None):
+    try:
+        a = AccionLog(
+            dispositivo_id=dispositivo_id,
+            evento=evento,
+            detalle=(detalle or {}),
+            actor=(actor or _actor_tag())
+        )
+        db.session.add(a)
+        # No hacemos commit aquí; se comitea en la transacción del caller
+    except Exception as e:
+        current_app.logger.warning(f"[accion_log] No se pudo registrar acción {evento} para {dispositivo_id}: {e}")
 
 @bp.route('/dispositivos', methods=['POST'])
 @jwt_required(optional=True)
@@ -220,6 +250,8 @@ def actualizar_dispositivo(id):
         data = request.get_json() or {}
         dispositivo = Dispositivo.query.get_or_404(id)
 
+        old_name = dispositivo.nombre  # para log de renombrado
+
         # --- CONFIGURACIÓN ---
         cfg_actual = dispositivo.configuracion or {}
         cfg_payload = data.get("configuracion") or {}
@@ -324,6 +356,9 @@ def actualizar_dispositivo(id):
                 # Otros estados (open/closed/locked/unlocked/watering/cleaning…) no definen encendido.
 
         # --- CAMPOS EXTRA (opcionales) ---
+        renamed = False
+        if "nombre" in data and data["nombre"] != dispositivo.nombre:
+            renamed = True
         if "nombre" in data:
             dispositivo.nombre = data["nombre"]
         if "tipo" in data:
@@ -337,13 +372,24 @@ def actualizar_dispositivo(id):
         dispositivo.parametros = parametros_merged
         dispositivo.configuracion = cfg_merged
 
-        # Log de cambio
+        # Logs: estado histórico
         log = EstadoLog(
             dispositivo_id=dispositivo.id,
             estado=dispositivo.estado,
             parametros=dispositivo.parametros or {}
         )
         db.session.add(log)
+
+        # Logs: acciones/configuración/renombrado
+        if renamed:
+            _log_action(dispositivo.id, "renamed", {"old": old_name, "new": dispositivo.nombre})
+        # Registrar el payload exacto que llegó (útil para auditoría/config)
+        if (cfg_payload or par_payload or flat_params or estado_in is not None):
+            _log_action(
+                dispositivo.id,
+                "config_changed",
+                {"payload": data}
+            )
 
         db.session.commit()
 
@@ -484,6 +530,9 @@ def reclamar_dispositivo():
 
         # Captura primitivos ANTES de commit
         disp_id = disp.id
+
+        # Log de acción: reclaim
+        _log_action(disp.id, "claimed", {"serial_number": disp.serial_number})
 
         try:
             db.session.commit() # guarda reclamado y cualquier config inicial
@@ -703,7 +752,7 @@ def _email_logo_abspath() -> str:
 def _send_email_html(to_email: str, subject: str, html: str, text: str = "", inline_images: list[dict] | None = None):
     """
     Envía correo HTML. Si 'inline_images' viene con dicts {cid, path, maintype, subtype, filename},
-    las incrusta como multipart/related y se referencian con <cid> en el HTML (src="cid:cid").
+    las incrusta como multipart/related y se referencian con <cid> en el HTML (src="cid:cid")."
     """
     smtp = _smtp_config()
     from_addr = smtp["user"]
@@ -1112,7 +1161,7 @@ def upload_avatar():
     extra = UserProfileExtra.query.filter_by(user_id=u.id).first()
     if not extra:
         extra = UserProfileExtra(user_id=u.id, avatar_path=rel_path.replace("\\", "/"))
-        # inicializar theme si existe columna
+        # inicializar tema si existe columna
         try:
             if getattr(extra, "theme", None) is None:
                 setattr(extra, "theme", "dark")
@@ -1430,6 +1479,10 @@ def agregar_dispositivo_a_habitacion(hid):
     dev = Dispositivo.query.get_or_404(int(device_id))
 
     _dev_set_habitacion_id(dev, room.id)
+
+    # Log de acción
+    _log_action(dev.id, "assigned_to_room", {"habitacion_id": room.id, "habitacion": room.nombre})
+
     db.session.commit()
 
     sse_publish({"event": "device_moved", "data": {"device_id": _dev_get_id(dev), "to_room": room.id}})
@@ -1448,6 +1501,10 @@ def quitar_dispositivo_de_habitacion(hid):
     dev = Dispositivo.query.get_or_404(int(device_id))
 
     _dev_set_habitacion_id(dev, None)
+
+    # Log de acción
+    _log_action(dev.id, "removed_from_room", {"habitacion_id": hid})
+
     db.session.commit()
 
     sse_publish({"event": "device_moved", "data": {"device_id": _dev_get_id(dev), "to_room": None}})
@@ -1468,3 +1525,120 @@ def _query_unclaimed_devices():
     if hasattr(Dispositivo, "claimed"):
         return Dispositivo.query.filter_by(claimed=False).order_by(Dispositivo.id.desc()).all()
     return [d for d in _query_all_devices() if not _dev_get_reclamado(d)]
+
+# =========================================================
+# NUEVO: EXPORTACIÓN A EXCEL POR DISPOSITIVO
+# =========================================================
+
+def _auto_fit(ws):
+    """Auto-ajusta (simple) el ancho de columnas según contenido."""
+    for column_cells in ws.columns:
+        length = 0
+        col = column_cells[0].column if hasattr(column_cells[0], "column") else column_cells[0].column_letter
+        for cell in column_cells:
+            try:
+                v = str(cell.value) if cell.value is not None else ""
+                if len(v) > length:
+                    length = len(v)
+            except Exception:
+                pass
+        ws.column_dimensions[get_column_letter(col)].width = min(max(length + 2, 12), 60)
+
+def _build_device_excel(dispositivo: Dispositivo) -> bytes:
+    wb = Workbook()
+
+    # --- Hoja 1: Resumen ---
+    ws1 = wb.active
+    ws1.title = "Resumen"
+
+    cfg = dispositivo.configuracion or {}
+    params = dispositivo.parametros or {}
+    room_name = None
+    try:
+        if dispositivo.habitacion_id and dispositivo.habitacion:
+            room_name = dispositivo.habitacion.nombre
+    except Exception:
+        room_name = None
+
+    resumen_rows = [
+        ("ID", dispositivo.id),
+        ("Serial", dispositivo.serial_number),
+        ("Nombre", dispositivo.nombre),
+        ("Tipo", dispositivo.tipo),
+        ("Modelo", dispositivo.modelo or ""),
+        ("Descripción", dispositivo.descripcion or ""),
+        ("Estado actual", dispositivo.estado or ""),
+        ("Habitación", room_name or "-"),
+        ("Reclamado", "Sí" if dispositivo.reclamado else "No"),
+        ("Capability", infer_capability(infer_kind(dispositivo.serial_number or "", cfg), cfg)),
+        ("Kind", infer_kind(dispositivo.serial_number or "", cfg)),
+        ("Configuración (JSON)", json.dumps(cfg, ensure_ascii=False)),
+        ("Parámetros (JSON)", json.dumps(params, ensure_ascii=False)),
+        ("Generado", datetime.utcnow().isoformat() + "Z"),
+    ]
+    ws1.append(["Campo", "Valor"])
+    for k, v in resumen_rows:
+        ws1.append([k, v])
+    _auto_fit(ws1)
+
+    # --- Hoja 2: Historial (Acciones + Estados) ---
+    ws2 = wb.create_sheet("Historial")
+
+    # Acciones
+    acciones = AccionLog.query.filter_by(dispositivo_id=dispositivo.id).order_by(AccionLog.timestamp.asc()).all()
+    # Estados
+    estados = EstadoLog.query.filter_by(dispositivo_id=dispositivo.id).order_by(EstadoLog.timestamp.asc()).all()
+
+    ws2.append(["Fecha/Hora (UTC)", "Tipo", "Evento/Estado", "Detalle"])
+    rows = []
+    for a in acciones:
+        rows.append((
+            a.timestamp.isoformat() + "Z",
+            "Acción",
+            a.evento,
+            json.dumps(a.detalle or {}, ensure_ascii=False)
+        ))
+    for e in estados:
+        rows.append((
+            e.timestamp.isoformat() + "Z",
+            "Estado",
+            e.estado or "",
+            json.dumps(e.parametros or {}, ensure_ascii=False)
+        ))
+    # Ordenar por fecha/hora por si acaso
+    rows.sort(key=lambda r: r[0])
+    for r in rows:
+        ws2.append(list(r))
+    _auto_fit(ws2)
+
+    # Serializar a bytes
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+@bp.route("/dispositivos/<int:id>/export", methods=["GET"])
+@bp.route("/dispositivos/<int:id>/export_excel", methods=["GET"])  # <-- NUEVO alias para Android
+@jwt_required(optional=True)
+def exportar_dispositivo_excel(id: int):
+    """
+    Exporta un Excel (.xlsx) SOLO de ese dispositivo:
+      - 'Resumen' con metadatos, configuración y parámetros actuales
+      - 'Historial' con Acciones (AccionLog) y Estados (EstadoLog) ordenados por tiempo
+
+    Disponible en dos rutas:
+      • /dispositivos/<id>/export           (compatibilidad)
+      • /dispositivos/<id>/export_excel     (la que usa el Android)
+    """
+    try:
+        dispositivo = Dispositivo.query.get_or_404(id)
+        data = _build_device_excel(dispositivo)
+        filename = f"dispositivo_{dispositivo.id}_{dispositivo.serial_number}.xlsx"
+        return send_file(
+            io.BytesIO(data),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        current_app.logger.error(f"[excel] Error exportando dispositivo {id}: {e}")
+        return jsonify({"error": "No se pudo generar el Excel", "detalle": str(e)}), 500

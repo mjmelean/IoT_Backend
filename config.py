@@ -61,16 +61,21 @@ class Config:
     SMTP_USE_SSL = bool(int(os.getenv("SMTP_USE_SSL", "1")))  # SSL directo
     SMTP_USE_TLS = bool(int(os.getenv("SMTP_USE_TLS", "0")))  # STARTTLS
 
-    # --- Certificado Autofirmado -----
-    SSL_ENABLED = False
+    # --- Certificado y DNS -----
+    SSL_ENABLED = True
     SSL_CERT_PATH = os.path.join(CA_DIR, "server.crt.pem")
     SSL_KEY_PATH  = os.path.join(CA_DIR, "server.key.pem")
-
+    
     # URL base dinámica 
     if SSL_ENABLED:
         BACKEND_URL = f"https://{BACKEND_HOST}:{BACKEND_PORT}"
     else:
         BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
+
+    # mDNS / Bonjour ---
+    MDNS_ENABLED = True  # Cambia a False si no quieres anunciar el servicio
+    MDNS_NAME = "smarthome.local"  # Nombre mDNS del backend (sin el punto final)
+
 
     # --- IOTELLIGENCE ---
 

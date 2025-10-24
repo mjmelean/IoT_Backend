@@ -37,7 +37,7 @@ def create_app():
     init_mqtt(app)
 
     # <<< INICIALIZA EL WORKER DE IA (para jobs batch con app_context)
-    init_ai_worker(app, max_workers=4)
+    init_ai_worker(app, max_workers=2)
 
     # Manejadores globales de errores
     @app.errorhandler(404)

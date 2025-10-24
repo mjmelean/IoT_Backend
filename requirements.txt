@@ -15,3 +15,9 @@ python-dotenv==1.0.0
 
 # --- IA-River ---
 river>=0.21
+
+#--- Excel ---
+openpyxl== 3.1.5
+
+#---Zeroconf ---
+zeroconf

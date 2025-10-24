@@ -18,12 +18,55 @@ class Dispositivo(db.Model):
 
     habitacion_id = db.Column(db.Integer, db.ForeignKey('habitacion.id'), nullable=True)
 
+    # Relaciones útiles para el informe:
+    # - estado_logs: mediciones/estados históricos (se llenan desde MQTT/PUT)
+    # - accion_logs: auditoría de acciones del usuario/sistema (reclamar, asignar/quitar, renombrar, cambios de config, etc.)
+    estado_logs = db.relationship(
+        "EstadoLog",
+        backref="dispositivo",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="EstadoLog.timestamp.asc()"
+    )
+    accion_logs = db.relationship(
+        "AccionLog",
+        backref="dispositivo",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="AccionLog.timestamp.asc()"
+    )
+
+
 class EstadoLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    dispositivo_id = db.Column(db.Integer, db.ForeignKey('dispositivo.id'), nullable=False)
+    dispositivo_id = db.Column(db.Integer, db.ForeignKey('dispositivo.id'), nullable=False, index=True)
     estado = db.Column(db.String(20))
     parametros = db.Column(JSON, default=dict)       # 👈
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+# ------------------------------------------------------------
+# NUEVO: Auditoría de acciones para informes (Excel por equipo)
+# ------------------------------------------------------------
+class AccionLog(db.Model):
+    """
+    Log de acciones/eventos de negocio sobre un dispositivo.
+    Ejemplos de `evento`:
+      - "claimed"                -> Dispositivo reclamado por el usuario
+      - "assigned_to_room"       -> Añadido a habitación (detalle: {"habitacion_id": X, "habitacion": "Sala"})
+      - "removed_from_room"      -> Quitado de habitación (detalle: {...})
+      - "renamed"                -> Cambió el nombre (detalle: {"old": "...", "new": "..."})
+      - "config_changed"         -> Se actualizó configuración/parametros (detalle: payload o diff)
+      - "action_performed"       -> Acciones tipo "apagarTodo", "blind_open", etc. (detalle: {"action": "...", ...})
+    `actor`: "user" | "system" | "mqtt" | etc.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    dispositivo_id = db.Column(db.Integer, db.ForeignKey('dispositivo.id'), nullable=False, index=True)
+    evento = db.Column(db.String(50), nullable=False, index=True)
+    detalle = db.Column(JSON, default=dict)  # se guarda payload/diff contextual
+    actor = db.Column(db.String(50), default="user", nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
 
 # -------------------------
 # Usuarios
@@ -56,6 +99,7 @@ class UserProfileExtra(db.Model):
 
     # relación opcional (no imprescindible para este caso)
     user = db.relationship("User", backref=db.backref("profile_extra", uselist=False))
+
 
 class Habitacion(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
