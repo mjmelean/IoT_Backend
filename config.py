@@ -62,7 +62,7 @@ class Config:
     SMTP_USE_TLS = bool(int(os.getenv("SMTP_USE_TLS", "0")))  # STARTTLS
 
     # --- Certificado y DNS -----
-    SSL_ENABLED = True
+    SSL_ENABLED = False
     SSL_CERT_PATH = os.path.join(CA_DIR, "server.crt.pem")
     SSL_KEY_PATH  = os.path.join(CA_DIR, "server.key.pem")
     
@@ -73,7 +73,7 @@ class Config:
         BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 
     # mDNS / Bonjour ---
-    MDNS_ENABLED = True  # Cambia a False si no quieres anunciar el servicio
+    MDNS_ENABLED = False  # Cambia a False si no quieres anunciar el servicio
     MDNS_NAME = "smarthome.local"  # Nombre mDNS del backend (sin el punto final)
 
 
@@ -141,3 +141,25 @@ class Config:
     AI_R4_REMIND_SECS = 60         # p.ej. cada 5 min
     # Periodo de gracia al arrancar el backend para evitar falsos positivos
     AI_R4_STARTUP_GRACE_SECS = 30    # p.ej. 30s
+
+    # Notificaciones Rule5 (open meteor) ------------------------------------------------------------
+    # === Open-Meteo / Rule5 (SOLO 'current') ===============================
+    OPENMETEO_LAT = 10.6544
+    OPENMETEO_LON = -71.6533
+    OPENMETEO_TIMEZONE = "America/Caracas"  # (no es estrictamente necesario para 'current')
+
+    # Qué variables queremos del bloque 'current' de Open-Meteo.
+    # Usa nombres CANÓNICOS internos: temperature, rain, precipitation, windspeed, uv_index, humidity, cloud_cover, shortwave_radiation
+    # (Se mapearán a los nombres reales de Open-Meteo; si alguna no existe en 'current', quedará None.)
+    OPENMETEO_CURRENT_FIELDS = [
+        "temperature", "rain", "precipitation", "windspeed", "uv_index", "humidity", "cloud_cover", "shortwave_radiation"
+    ]
+
+    OPENMETEO_CACHE_TTL_S = 180   # cache corto (3 min) para 'current'
+    OPENMETEO_CONNECT_TIMEOUT_S = 3
+    OPENMETEO_READ_TIMEOUT_S = 5
+
+    # Comportamiento Rule5
+    WEATHER_ACTION_MODE = "notify_and_shutdown"  # "notify_only" | "notify_and_shutdown"
+    WEATHER_COOLDOWN_S = 900
+    WEATHER_ONLY_FOR_PREFIXES = []  # p.ej.: ["RGD0","LGT0"]

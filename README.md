@@ -416,21 +416,81 @@ Ejemplo ai_back_online:
 }
 ```
 
-### 🔔 SSE en `/stream/ai`
-
-  
+### 🔔 SSE en `/stream/ai`  
 
 Eventos posibles:
-
-  
-
 -  `ai_anomaly` → regla 1 (valores fuera de rango).
-
-  
-
 -  `ai_misconfig` → regla 2 (configuración incorrecta).
 
-  
+
+### 🌦️ Rule 5 — Meteo (`meteo`)
+
+- Usa condiciones actuales del clima (Open-Meteo) para tomar decisiones automáticas por kind (p.ej., si rain ≥ 1.0 → notificar y/o apagar riego).
+	- Trabaja sólo con current (no predicciones) y normaliza a claves canónicas:
+		- temperature
+		- rain
+		- precipitation
+		- windspeed
+		- uv_indez
+		- humidity
+		- cloud_cover
+		- shortwave_radation
+	- Permite inyección de valores para pruebas/demos (sin depender del clima real).
+
+🧩 Endpoints
+`GET /meteo `→ snapshot actual normalizado.
+`POST /meteo/inject` → inyección temporal de valores.
+
+```json
+GET /meteo — Estado meteorológico actual (normalizado)
+{
+  "event": "ai_meteo_notice",
+  "rule": "meteo",
+  "dispositivo_id": 4,
+  "serial_number": "RGD0XYZ123",
+  "kind": "riego",
+  "matched_condition": { "rain": { ">=": 1.0 } },
+  "reason": "Lluvia suficiente",
+  "meteo": { "rain": 3.5, "uv_index": 6.2, "temperature": 27.8 },
+  "ts_local": "...",
+  "ts_utc": "..."
+}
+```
+
+🧪 Pruebas rápidas
+
+cURL — inyectar lluvia por 120s
+
+curl -X POST http://localhost:5000/meteo/inject \
+  -H "Content-Type: application/json" \
+  -d '{ "payload": { "rain": 3.5 }, "ttl_sec": 120 }'
+
+PowerShell — inyectar UV=11 por 60s
+
+$body = @{ payload = @{ uv_index = 11 }; ttl_sec = 60 } | Convert-ToJson -Depth 5
+Invoke-RestMethod -Uri "http://localhost:5000/meteo/inject" -Method Post `
+  -ContentType "application/json" -Body $body
+
+PowerShell — limpiar inyección
+
+$body = @{ payload = $null } | Convert-ToJson -Depth 5
+Invoke-RestMethod -Uri "http://localhost:5000/meteo/inject" -Method Post `
+  -ContentType "application/json" -Body $body
+
+cURL — leer snapshot actual
+
+
+### 🔔 SSE en `/stream/ai`  
+
+Eventos posibles:
+-  `ai_anomaly` → regla 1 (valores fuera de rango).
+-  `ai_misconfig` → regla 2 (configuración incorrecta).
+
+
+
+
+
+
 
 ---
 
@@ -510,6 +570,30 @@ AI_R4_WATCHDOG_TICK_SECS (intervalo de revisión)
 AI_R4_REMIND_SECS (recordatorios mientras sigue offline; 0 = desactivado)
 
 AI_R4_STARTUP_GRACE_SECS (gracia al arrancar el backend)
+
+ ### 🔹 Rule 5 –  (`ai_meteo_notice`)
+ Coordenadas del lugar (lat/lon decimales)
+OPENMETEO_LAT = 10.642707
+OPENMETEO_LON = -71.612534
+
+ Campos 'current' que se solicitarán a Open-Meteo
+OPENMETEO_CURRENT_FIELDS = [
+	  "temperature","rain","precipitation","windspeed",
+	  "uv_index","humidity","cloud_cover","shortwave_radiation"
+]
+
+#Timeouts y cache
+OPENMETEO_CONNECT_TIMEOUT_S = 3
+OPENMETEO_READ_TIMEOUT_S    = 5
+OPENMETEO_CACHE_TTL_S       = 180  # segundos
+
+#Si quieres que SOLO notifique y NO cambie estados:
+ (por ejemplo en pruebas o entornos sensibles)
+METEO_ONLY_NOTIFY = False  # True = no ejecuta shutdowns
+
+> Nota de unidades (Open-Meteo):
+temperature (°C), windspeed (m/s), humidity (%), cloud_cover (%), uv_index (0–11+),
+precipitation (mm), rain (mm), shortwave_radiation (W/m²).
 
 ---
 

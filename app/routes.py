@@ -12,7 +12,7 @@ from app.models import (
     AccionLog           # <-- NUEVO: para auditoría/eventos de negocio
 )
 from app.sse import subscribe, unsubscribe, publish as sse_publish
-import json, time
+import json, time, requests
 from queue import Empty
 from datetime import datetime, timezone
 from app.iotelligence.core import dispatch_measure
@@ -595,6 +595,174 @@ def update_dispositivo_from_payload(dispositivo, data, reclamar=False):
         dispositivo.reclamado = True
 
     return dispositivo
+
+### OPEN METEO ENDPOINTS
+# Estado de inyección en memoria (simple)
+_METEO_INJECT = {"payload": None, "until": 0.0}
+_LAST_METEO = {"ts": 0.0, "data": None}  # cache de respuesta (normalizada)
+
+# ---- normalización de claves a canónicas para Rule5 --------------------
+def _normalize_current_payload(raw: dict) -> dict:
+    """
+    Convierte diversas claves (current de Open-Meteo o payload inyectado) a canónicas:
+      temperature, rain, precipitation, windspeed, uv_index, humidity, cloud_cover, shortwave_radiation
+    Si un campo no existe, no aparece o queda como None.
+    """
+    if not isinstance(raw, dict):
+        return {}
+
+    # Mapeo de nombres reales en 'current' -> canónicos
+    # Referencia común de Open-Meteo 'current' (puede variar por modelo):
+    # temperature_2m, wind_speed_10m, uv_index, precipitation, rain, relative_humidity_2m, cloud_cover (a veces), shortwave_radiation (raro en current)
+    current_to_canon = {
+        "temperature_2m": "temperature",
+        "wind_speed_10m": "windspeed",
+        "uv_index": "uv_index",
+        "precipitation": "precipitation",
+        "rain": "rain",
+        "relative_humidity_2m": "humidity",
+        "cloud_cover": "cloud_cover",
+        "shortwave_radiation": "shortwave_radiation",
+    }
+
+    # Alias de entrada adicionales (por si inyectas nombres distintos)
+    alias = {
+        "temp": "temperature",
+        "temperature": "temperature",
+        "wind": "windspeed",
+        "wind_speed": "windspeed",
+        "windspeed": "windspeed",
+        "uv": "uv_index",
+        "humidity": "humidity",
+        "clouds": "cloud_cover",
+        "sw_rad": "shortwave_radiation",
+        "light": "shortwave_radiation",
+    }
+
+    out = {}
+
+    # 1) Si viene un paquete completo de open-meteo (con 'current'), tómalo
+    src = raw.get("current") if isinstance(raw.get("current"), dict) else raw
+
+    # 2) Mapea current->canónico
+    for k, v in src.items():
+        if k in current_to_canon:
+            out[current_to_canon[k]] = v
+
+    # 3) Aplica alias (útil para payloads de inyección o datasets propios)
+    for k, v in src.items():
+        if k in alias and alias[k] not in out:
+            out[alias[k]] = v
+
+    # 4) Asegura presencia de claves canónicas (aunque None si no existen)
+    canons = ["temperature", "rain", "precipitation", "windspeed", "uv_index", "humidity", "cloud_cover", "shortwave_radiation"]
+    for c in canons:
+        out.setdefault(c, None)
+
+    # Preferencias: si hay rain y precipitation ausente, o viceversa, deja ambos si existen
+    # (no se pisa uno con otro; la regla puede usar el que quiera)
+    return out
+
+def _build_openmeteo_current_params():
+    cfg = current_app.config
+    lat = cfg.get("OPENMETEO_LAT")
+    lon = cfg.get("OPENMETEO_LON")
+
+    # canónico -> nombre en 'current'
+    canon_to_current = {
+        "temperature": "temperature_2m",
+        "windspeed": "wind_speed_10m",
+        "uv_index": "uv_index",
+        "rain": "rain",
+        "precipitation": "precipitation",
+        "humidity": "relative_humidity_2m",
+        "cloud_cover": "cloud_cover",
+        "shortwave_radiation": "shortwave_radiation",
+    }
+
+    want = []
+    for f in current_app.config.get("OPENMETEO_CURRENT_FIELDS", []):
+        nm = canon_to_current.get(f.strip())
+        if nm and nm not in want:
+            want.append(nm)
+    if not want:
+        want = ["temperature_2m","wind_speed_10m","uv_index","rain","relative_humidity_2m"]
+
+    return {
+        "base": "https://api.open-meteo.com/v1/forecast",
+        "params": {
+            "latitude": lat,
+            "longitude": lon,
+            "current": ",".join(want)
+        }
+    }
+
+def _fetch_openmeteo_current():
+    """Consulta Open-Meteo (solo 'current'), con timeouts, y devuelve dict CANÓNICO."""
+    try:
+        setup = _build_openmeteo_current_params()
+        tconn = int(current_app.config.get("OPENMETEO_CONNECT_TIMEOUT_S", 3))
+        tread = int(current_app.config.get("OPENMETEO_READ_TIMEOUT_S", 5))
+        r = requests.get(setup["base"], params=setup["params"], timeout=(tconn, tread))
+        r.raise_for_status()
+        js = r.json()
+        cur = js.get("current", {}) or js.get("current_weather", {}) or {}
+        return _normalize_current_payload(cur)
+    except Exception as e:
+        return {"_error": str(e)}
+
+def _get_meteo_live():
+    """Lee Open-Meteo/current con cache + respeta inyección (todo normalizado a canónico)."""
+    now = time.time()
+
+    # 1) inyección manda (si activa)
+    if _METEO_INJECT["payload"] is not None and now < _METEO_INJECT["until"]:
+        norm = _normalize_current_payload(_METEO_INJECT["payload"])
+        return {"source": "injected", "at": int(now), "data": norm}
+
+    # 2) cache
+    ttl = int(current_app.config.get("OPENMETEO_CACHE_TTL_S", 180))
+    if _LAST_METEO["data"] is not None and (now - _LAST_METEO["ts"]) < ttl:
+        return {"source": "cache", "at": int(_LAST_METEO["ts"]), "data": _LAST_METEO["data"]}
+
+    # 3) fetch
+    data = _fetch_openmeteo_current()
+    if data and "_error" not in data:
+        _LAST_METEO["ts"] = now
+        _LAST_METEO["data"] = data
+        return {"source": "open-meteo", "at": int(now), "data": data}
+
+    # error
+    if _LAST_METEO["data"] is not None:
+        return {"source": "stale-cache", "at": int(_LAST_METEO["ts"]), "data": _LAST_METEO["data"], "error": data.get("_error")}
+    return {"source": "error", "at": int(now), "error": data.get("_error"), "data": None}
+
+@bp.route("/meteo", methods=["GET"])
+def meteo_now():
+    """Devuelve el snapshot meteo actual (normalizado a canónico)."""
+    return jsonify(_get_meteo_live())
+
+@bp.route("/meteo/inject", methods=["POST"])
+def meteo_inject():
+    """
+    Inyecta datos actuales (normalizados automáticamente).
+    body: { "payload": { ... }, "ttl_sec": 60 }
+    Ejemplo payload: { "rain": 8.5, "uv_index": 9 } o estilo 'current' de Open-Meteo.
+    Si 'payload' es {} o null -> limpia inyección.
+    """
+    body = request.get_json() or {}
+    payload = body.get("payload")
+    ttl = int(body.get("ttl_sec", 60))
+    now = time.time()
+
+    if isinstance(payload, dict) and payload:
+        _METEO_INJECT["payload"] = payload
+        _METEO_INJECT["until"] = now + max(1, ttl)
+        return jsonify({"ok": True, "mode": "injected", "until": int(_METEO_INJECT["until"])})
+    else:
+        _METEO_INJECT["payload"] = None
+        _METEO_INJECT["until"] = 0.0
+        return jsonify({"ok": True, "mode": "cleared"})
 
 @bp.route('/stream/dispositivos', methods=['GET'])
 def stream_dispositivos():

@@ -1,0 +1,40 @@
+{
+  "RGD0": [
+    { "metric": "rain", "op": ">", "threshold": 0.0, "action": "shutdown", "note": "Evita riego si está lloviendo" },
+    { "metric": "precipitation", "op": ">", "threshold": 0.2, "action": "shutdown", "note": "Evita riego con humedad elevada" }
+  ],
+
+  "LGT0": [
+    { "metric": "shortwave_radiation", "op": ">", "threshold": 400, "action": "shutdown", "note": "Apaga luces si hay luz natural suficiente" },
+    { "metric": "cloud_cover", "op": "<", "threshold": 20, "action": "shutdown", "note": "Apaga luces si el cielo está despejado" }
+  ],
+
+  "FAN0": [
+    { "metric": "temperature_2m", "op": ">", "threshold": 30.0, "action": "notify", "note": "Temperatura alta: posible encender ventilador" },
+    { "metric": "temperature_2m", "op": "<", "threshold": 24.0, "action": "shutdown", "note": "Temperatura baja: apaga ventilador" }
+  ],
+
+  "TMP0": [
+    { "metric": "temperature_2m", "op": ">", "threshold": 35.0, "action": "notify", "note": "Temperatura ambiental excesiva" },
+    { "metric": "temperature_2m", "op": "<", "threshold": 18.0, "action": "notify", "note": "Temperatura ambiental muy baja" }
+  ],
+
+  "PLG0": [
+    { "metric": "shortwave_radiation", "op": ">", "threshold": 500, "action": "shutdown", "note": "Corte de energía solar excesiva" },
+    { "metric": "rain", "op": ">", "threshold": 1.0, "action": "notify", "note": "Humedad o lluvia, revisar conexiones eléctricas" }
+  ],
+
+  "SHD0": [
+    { "metric": "shortwave_radiation", "op": ">", "threshold": 600, "action": "notify", "note": "Exceso de radiación solar — considerar cerrar persianas" },
+    { "metric": "cloud_cover", "op": ">", "threshold": 80, "action": "shutdown", "note": "Cierra persianas por cielo muy nublado" }
+  ],
+
+  "CAM0": [
+    { "metric": "rain", "op": ">", "threshold": 1.0, "action": "notify", "note": "Lluvia detectada — posible obstrucción de lente" }
+  ],
+
+  "LUX0": [
+    { "metric": "shortwave_radiation", "op": ">", "threshold": 400, "action": "notify", "note": "Alta luminosidad ambiental" },
+    { "metric": "shortwave_radiation", "op": "<", "threshold": 100, "action": "notify", "note": "Baja luminosidad ambiental" }
+  ]
+}
